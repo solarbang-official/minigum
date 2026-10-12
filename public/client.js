@@ -18,31 +18,31 @@ let match = null, infos = [], names = {}, varOf = {};
 let lastSnap = null, lastSnapAt = 0;
 let announcements = [];
 
-// ---------- BGM Playlist ----------
+// ---------- BGM Playlist & Volume ----------
 const BGM_TRACKS = [
   '/audio/01. Spilt Milk.mp3',
   '/audio/05. Smashed Avo.mp3'
 ];
 let currentTrackIdx = 0;
 let bgmAudio = null;
-let bgmEnabled = true;
+let bgmVol = localStorage.mgVol !== undefined ? +localStorage.mgVol : 0.35;
 
 function initBGM() {
   if (bgmAudio) return;
   bgmAudio = new Audio(BGM_TRACKS[currentTrackIdx]);
-  bgmAudio.volume = 0.35;
+  bgmAudio.volume = bgmVol;
   
-  // Automatically play next song in playlist when finished
   bgmAudio.addEventListener('ended', () => {
     currentTrackIdx = (currentTrackIdx + 1) % BGM_TRACKS.length;
     bgmAudio.src = BGM_TRACKS[currentTrackIdx];
+    bgmAudio.volume = bgmVol;
     bgmAudio.play().catch(() => {});
   });
 }
 
 function playBGM() {
   ensureAudio();
-  if (bgmAudio && bgmEnabled && bgmAudio.paused) {
+  if (bgmAudio && bgmVol > 0 && bgmAudio.paused) {
     bgmAudio.play().catch(() => {});
   }
 }
@@ -62,6 +62,13 @@ function buildVariantPicker(el, taken, onPick) {
 function pickVariantMenu(i) { myVar = i; localStorage.mgVar = i; buildVariantPicker($('#variants'), new Set(), pickVariantMenu); }
 $('#name').value = myName;
 $('#name').oninput = e => { myName = e.target.value; localStorage.mgName = myName; };
+$('#bgmVol').value = bgmVol;
+$('#bgmVol').oninput = e => {
+  bgmVol = +e.target.value;
+  localStorage.mgVol = bgmVol;
+  if (bgmAudio) bgmAudio.volume = bgmVol;
+  if (bgmVol > 0) playBGM();
+};
 pickVariantMenu(myVar);
 
 function formHTML(botsLabel, botsMin) {
@@ -322,13 +329,16 @@ function draw(snap, age, now) {
     ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.beginPath(); ctx.ellipse(x, y + 16, 14, 5, 0, 0, 7); ctx.fill();
     if (p.ds >= 0 && !p.dc) { drawDisguise(p.ds, x, y); ctx.restore(); continue; }
     if (p.iv && Math.floor(now / 70) % 2) ctx.globalAlpha = 0.5;
-    const face = Math.cos(p.a) < 0 ? -1 : 1, img = fishImgs[p.v];
+    
+    // OPTIMIZATION: Predict aiming locally for self (p.id === myId) to achieve 0ms aim latency
+    const aimAngle = (p.id === myId && haveMouse) ? lastAim : p.a;
+    const face = Math.cos(aimAngle) < 0 ? -1 : 1, img = fishImgs[p.v];
     const bob = p.dh ? 0 : (Math.abs(p.vx) + Math.abs(p.vy) > 10 ? Math.sin(now / 60) * 1.5 : 0);
 
-    const ax = Math.cos(p.a), ay = Math.sin(p.a), px = -ay, py = ax;
+    const ax = Math.cos(aimAngle), ay = Math.sin(aimAngle), px = -ay, py = ax;
     if (!p.dc) {
-      if (p.hd >= 1) drawBoom(x + ax * 16 + px * 12, y + ay * 16 + py * 12, p.a + 0.4, V[p.v].body, 1);
-      if (p.hd >= 2) drawBoom(x + ax * 16 - px * 12, y + ay * 16 - py * 12, p.a - 0.4, V[p.v].body, 1);
+      if (p.hd >= 1) drawBoom(x + ax * 16 + px * 12, y + ay * 16 + py * 12, aimAngle + 0.4, V[p.v].body, 1);
+      if (p.hd >= 2) drawBoom(x + ax * 16 - px * 12, y + ay * 16 - py * 12, aimAngle - 0.4, V[p.v].body, 1);
     }
     ctx.translate(x, y + bob); if (p.dh) { ctx.rotate(face * 0.35); }
     ctx.scale(face * 0.72, 0.72); if (img.complete) ctx.drawImage(img, -26.85, -23.7, 53.7, 47.44);
@@ -337,8 +347,8 @@ function draw(snap, age, now) {
     if (p.bn) for (let i = 0; i < 4; i++) { const f = Math.sin(now / 60 + i * 2); ctx.fillStyle = `rgba(255,${120 + i * 30},20,0.85)`; ctx.beginPath(); ctx.arc(x - 12 + i * 8, y - 6 + f * 4 - i % 2 * 6, 6 - i * 0.4, 0, 7); ctx.fill(); }
     if (p.sh) { ctx.strokeStyle = 'rgba(120,230,255,0.9)'; ctx.fillStyle = 'rgba(120,230,255,0.18)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(x, y, 24, 0, 7); ctx.fill(); ctx.stroke(); }
     if (p.tk) { ctx.strokeStyle = '#d68bff'; ctx.lineWidth = 2; ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.arc(x, y, 260, 0, 7); ctx.stroke(); ctx.setLineDash([]); }
-    if (lmbHeld && !recallHold && p.id === myId) { ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 3; ctx.setLineDash([2, 10]); ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(x + Math.cos(p.a) * 26, y + Math.sin(p.a) * 26); ctx.lineTo(x + Math.cos(p.a) * 190, y + Math.sin(p.a) * 190); ctx.stroke(); ctx.setLineDash([]); ctx.lineCap = 'butt'; }
-    if (p.sl > 0) { ctx.strokeStyle = `rgba(255,255,255,${p.sl})`; ctx.lineWidth = 6; ctx.beginPath(); ctx.arc(x, y, 38, p.a - 1.3 + (1 - p.sl) * 0.8, p.a + 1.3 - p.sl * 0.2 * 0); ctx.stroke(); }
+    if (lmbHeld && !recallHold && p.id === myId) { ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 3; ctx.setLineDash([2, 10]); ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(x + Math.cos(aimAngle) * 26, y + Math.sin(aimAngle) * 26); ctx.lineTo(x + Math.cos(aimAngle) * 190, y + Math.sin(aimAngle) * 190); ctx.stroke(); ctx.setLineDash([]); ctx.lineCap = 'butt'; }
+    if (p.sl > 0) { ctx.strokeStyle = `rgba(255,255,255,${p.sl})`; ctx.lineWidth = 6; ctx.beginPath(); ctx.arc(x, y, 38, aimAngle - 1.3 + (1 - p.sl) * 0.8, aimAngle + 1.3 - p.sl * 0.2 * 0); ctx.stroke(); }
     if (p.bm) { ctx.fillStyle = '#ff6b6b'; ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('?!', x, y - 32); }
     if (!p.dc) {
       ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'center'; ctx.lineWidth = 3; ctx.strokeStyle = '#000'; ctx.fillStyle = p.id === myId ? '#ffe36b' : '#fff';
@@ -430,12 +440,13 @@ function frame(nowT) {
   requestAnimationFrame(frame);
 }
 
+// OPTIMIZATION: Send input packets at 60Hz (16ms) rather than 30Hz (33ms) to halve movement latency
 setInterval(() => {
   if (mode !== 'mp' || !ws || !lastSnap) return;
   const i = buildInput(lastSnap);
   wsSend({ t: 'input', mx: i.mx, my: i.my, aim: +i.aim.toFixed(3), dh: i.dh, tt: i.tt, mm: i.mm, dd: i.dd, rr: i.rr });
   latch.t = latch.m = latch.d = latch.r = false;
-}, 33);
+}, 16);
 
 requestAnimationFrame(frame);
 show('menu');
