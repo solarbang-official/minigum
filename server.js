@@ -4,7 +4,6 @@ const { WebSocketServer } = require('ws');
 const G = require('./shared/game.js');
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon' };
 
 const server = http.createServer((req, res) => {
@@ -112,4 +111,4 @@ wss.on('connection', ws => {
   ws.on('error', () => {});
 });
 
-server.listen(PORT, () => console.log('MiniGums running on http://localhost:' + PORT));
+server.listen(PORT, () => console.log('MiniGums running on port ' + PORT));
