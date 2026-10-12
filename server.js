@@ -1,6 +1,7 @@
 'use strict';
 const http = require('http'), fs = require('fs'), path = require('path');
 const { WebSocketServer } = require('ws');
+const { performance } = require('perf_hooks');
 const G = require('./shared/game.js');
 
 const PORT = process.env.PORT || 3000;
@@ -20,12 +21,19 @@ const server = http.createServer((req, res) => {
   });
 });
 
-const wss = new WebSocketServer({ server, maxPayload: 4096 });
+// OPTIMIZATION 1: Disable perMessageDeflate compression to remove CPU overhead on small packets
+const wss = new WebSocketServer({ 
+  server, 
+  maxPayload: 4096,
+  perMessageDeflate: false 
+});
+
 const rooms = new Map();
 let nextId = 1;
 
 const send = (ws, o) => { if (ws.readyState === 1) ws.send(JSON.stringify(o)); };
 const broadcast = (room, o) => { const s = JSON.stringify(o); for (const c of room.clients.values()) if (c.ws.readyState === 1) c.ws.send(s); };
+
 function newCode() {
   let c;
   do { c = ''; for (let i = 0; i < 4; i++) c += 'ABCDEFGHJKLMNPQRSTUVWXYZ'[Math.floor(Math.random() * 24)]; } while (rooms.has(c));
@@ -50,19 +58,29 @@ function startMatch(room) {
   const infos = G.fillBots(humans, nb);
   room.match = new G.Match(room.settings, infos);
   broadcast(room, { t: 'start', infos, settings: room.settings });
-  room.last = Date.now(); room.tick = 0;
+  
+  // OPTIMIZATION 2: Sub-millisecond timer accuracy with performance.now()
+  room.last = performance.now(); 
+  room.tick = 0;
   room.timer = setInterval(() => loop(room), 1000 / 60);
 }
+
 function loop(room) {
-  const now = Date.now(), dt = Math.min(0.05, (now - room.last) / 1000); room.last = now;
-  room.match.step(dt); room.tick++;
-  if (room.tick % 2 === 0) broadcast(room, Object.assign({ t: 's' }, room.match.snapshot()));
+  const now = performance.now(), dt = Math.min(0.05, (now - room.last) / 1000); 
+  room.last = now;
+  room.match.step(dt); 
+  room.tick++;
+  
+  // OPTIMIZATION 3: Broadcast network snapshots at 20Hz (every 3 ticks at 60FPS) to avoid cloud buffer queuing
+  if (room.tick % 3 === 0) broadcast(room, Object.assign({ t: 's' }, room.match.snapshot()));
   if (room.match.finished) endMatch(room);
 }
+
 function endMatch(room) {
   clearInterval(room.timer); room.match = null;
   broadcast(room, { t: 'lobby' }); broadcast(room, roomInfo(room));
 }
+
 function leaveRoom(c) {
   const room = c.room; if (!room) return;
   c.room = null; room.clients.delete(c.id);
@@ -71,6 +89,7 @@ function leaveRoom(c) {
   if (room.match) room.match.replaceWithBot(c.id);
   broadcast(room, roomInfo(room));
 }
+
 function joinRoom(c, room) {
   c.room = room; c.variant = freeVariant(room, c.variant);
   room.clients.set(c.id, c);
@@ -78,9 +97,15 @@ function joinRoom(c, room) {
 }
 
 wss.on('connection', ws => {
+  // OPTIMIZATION 4: Disable TCP Nagle's algorithm (setNoDelay) to flush packets instantly
+  if (ws._socket && ws._socket.setNoDelay) {
+    ws._socket.setNoDelay(true);
+  }
+
   const c = { id: 'p' + (nextId++), ws, name: 'Player', variant: 0, room: null, alive: true };
   ws.on('pong', () => { c.alive = true; });
   send(ws, { t: 'hello', id: c.id });
+
   ws.on('message', raw => {
     let m; try { m = JSON.parse(raw); } catch (e) { return; }
     if (!m || typeof m !== 'object') return;
@@ -107,8 +132,18 @@ wss.on('connection', ws => {
       case 'leave': leaveRoom(c); break;
     }
   });
+
   ws.on('close', () => leaveRoom(c));
   ws.on('error', () => {});
 });
+
+// OPTIMIZATION 5: Keep-alive heartbeat interval to keep WebSocket reverse proxies warm on Render
+const heartbeat = setInterval(() => {
+  for (const ws of wss.clients) {
+    if (ws.readyState === 1) ws.ping();
+  }
+}, 20000);
+
+wss.on('close', () => clearInterval(heartbeat));
 
 server.listen(PORT, () => console.log('MiniGums running on port ' + PORT));
