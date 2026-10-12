@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>MiniGums</title>
+<style>
+  :root { --bg:#12303a; --panel:#1c4452; --ink:#f3f7f4; --muted:#9bc2c9; --accent:#ffcf4a; }
+  * { box-sizing: border-box; }
+  html,body { margin:0; height:100%; background:#0c2027; color:var(--ink); font-family: "Trebuchet MS", system-ui, sans-serif; overflow:hidden; }
+  canvas { position:fixed; inset:0; width:100%; height:100%; display:block; }
+  #ui { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; background:radial-gradient(circle at 50% 30%, #1d5a6a, #0c2027 70%); overflow:auto; padding:16px; }
+  #ui.hidden, .hidden { display:none !important; }
+  .panel { background:var(--panel); border:3px solid #0c2027; border-radius:16px; padding:22px 26px; width:min(520px,100%); box-shadow:0 10px 0 #0c2027; }
+  h1 { margin:0 0 4px; font-size:44px; letter-spacing:1px; color:var(--accent); text-shadow:0 4px 0 #0c2027; }
+  h2 { margin:0 0 10px; }
+  .sub { color:var(--muted); margin:0 0 16px; }
+  label { display:flex; justify-content:space-between; align-items:center; gap:12px; margin:8px 0; }
+  input[type=text], input[type=number], select { background:#0f2b34; color:var(--ink); border:2px solid #2d6272; border-radius:8px; padding:7px 9px; font:inherit; min-width:150px; }
+  input[type=checkbox] { width:22px; height:22px; }
+  button { font:inherit; font-weight:bold; background:var(--accent); color:#3a2a00; border:0; border-radius:10px; padding:10px 16px; cursor:pointer; box-shadow:0 4px 0 #a47e0f; }
+  button:active { transform:translateY(3px); box-shadow:0 1px 0 #a47e0f; }
+  button.sec { background:#3f7c8c; color:#fff; box-shadow:0 4px 0 #265563; }
+  button:disabled { opacity:.5; cursor:default; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; margin-top:12px; }
+  .row > * { flex:1; }
+  #variants { display:flex; flex-wrap:wrap; gap:6px; margin:6px 0 14px; }
+  .vsw { width:52px; height:48px; border-radius:10px; border:3px solid transparent; background:#0f2b34; display:flex; align-items:center; justify-content:center; cursor:pointer; padding:0; }
+  .vsw img { width:40px; height:36px; }
+  .vsw.sel { border-color:var(--accent); }
+  .vsw.taken { opacity:.25; cursor:default; }
+  #plist div { display:flex; align-items:center; gap:10px; padding:5px 0; font-size:18px; }
+  #plist img { width:32px; height:28px; }
+  .code { font-size:44px; letter-spacing:8px; color:var(--accent); font-weight:bold; text-align:center; margin:4px 0 8px; }
+  .err { color:#ff9c8f; min-height:20px; margin-top:8px; }
+  #leave { position:fixed; top:8px; right:8px; z-index:5; padding:6px 12px; font-size:14px; opacity:.8; }
+  .hint { color:var(--muted); font-size:13px; margin-top:12px; line-height:1.5; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<button id="leave" class="sec hidden">Leave</button>
+<div id="ui">
+  <div id="menu" class="panel">
+    <h1>MiniGums</h1>
+    <p class="sub">Throw. Slash. Survive.</p>
+    <label>Name <input id="name" type="text" maxlength="14" placeholder="Your name"></label>
+    <div class="sub" style="margin:8px 0 0">Pick your gum</div>
+    <div id="variants"></div>
+    <div class="row"><button id="btnSP">Single Player</button></div>
+    <div class="row"><button id="btnCreate" class="sec">Create Online Room</button></div>
+    <div class="row">
+      <input id="joinCode" type="text" maxlength="4" placeholder="ROOM CODE" style="text-transform:uppercase;flex:1.2">
+      <button id="btnJoin" class="sec">Join Room</button>
+    </div>
+    <div class="err" id="menuErr"></div>
+    <div class="hint"><b>Move</b> WASD / arrows &nbsp; <b>Aim</b> mouse &nbsp; <b>Throw</b> hold click, release / J &nbsp; <b>Slash</b> right-click / K<br>
+      <b>Dash</b> Space / Shift &nbsp; <b>Recall</b> hold click with no boomerang, or E / R &nbsp; (hold dash to steer with Telekinesis)</div>
+  </div>
+
+  <div id="setup" class="panel hidden">
+    <h2>Single Player</h2>
+    <div id="spForm"></div>
+    <div class="row"><button id="spStart">Start</button><button id="spBack" class="sec">Back</button></div>
+  </div>
+
+  <div id="lobby" class="panel hidden">
+    <h2>Room</h2>
+    <div class="code" id="lobCode">----</div>
+    <p class="sub" style="text-align:center">Share this code with friends (up to 6 players).</p>
+    <div id="plist"></div>
+    <div id="lobVariants" style="margin-top:8px"><div class="sub" style="margin:0">Your gum</div><div id="variants2" style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0"></div></div>
+    <div id="lobForm"></div>
+    <div class="row"><button id="lobStart">Start Match</button><button id="lobLeave" class="sec">Leave</button></div>
+    <div class="hint" id="lobHint"></div>
+  </div>
+</div>
+<script src="/shared/arenas.js"></script>
+<script src="/shared/game.js"></script>
+<script src="/client.js"></script>
+</body>
+</html>
