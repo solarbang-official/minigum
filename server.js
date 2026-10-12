@@ -5,7 +5,18 @@ const { performance } = require('perf_hooks');
 const G = require('./shared/game.js');
 
 const PORT = process.env.PORT || 3000;
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon' };
+const MIME = { 
+  '.html': 'text/html; charset=utf-8', 
+  '.js': 'text/javascript; charset=utf-8', 
+  '.css': 'text/css', 
+  '.svg': 'image/svg+xml', 
+  '.png': 'image/png', 
+  '.ico': 'image/x-icon',
+  '.mp3': 'audio/mpeg',
+  '.wav': 'audio/wav',
+  '.ogg': 'audio/ogg',
+  '.m4a': 'audio/mp4'
+};
 
 const server = http.createServer((req, res) => {
   let u; try { u = decodeURIComponent(req.url.split('?')[0]); } catch (e) { res.writeHead(400); return res.end(); }
@@ -21,7 +32,6 @@ const server = http.createServer((req, res) => {
   });
 });
 
-// OPTIMIZATION 1: Disable perMessageDeflate compression to remove CPU overhead on small packets
 const wss = new WebSocketServer({ 
   server, 
   maxPayload: 4096,
@@ -59,7 +69,6 @@ function startMatch(room) {
   room.match = new G.Match(room.settings, infos);
   broadcast(room, { t: 'start', infos, settings: room.settings });
   
-  // OPTIMIZATION 2: Sub-millisecond timer accuracy with performance.now()
   room.last = performance.now(); 
   room.tick = 0;
   room.timer = setInterval(() => loop(room), 1000 / 60);
@@ -71,7 +80,6 @@ function loop(room) {
   room.match.step(dt); 
   room.tick++;
   
-  // OPTIMIZATION 3: Broadcast network snapshots at 20Hz (every 3 ticks at 60FPS) to avoid cloud buffer queuing
   if (room.tick % 3 === 0) broadcast(room, Object.assign({ t: 's' }, room.match.snapshot()));
   if (room.match.finished) endMatch(room);
 }
@@ -97,7 +105,6 @@ function joinRoom(c, room) {
 }
 
 wss.on('connection', ws => {
-  // OPTIMIZATION 4: Disable TCP Nagle's algorithm (setNoDelay) to flush packets instantly
   if (ws._socket && ws._socket.setNoDelay) {
     ws._socket.setNoDelay(true);
   }
@@ -137,7 +144,6 @@ wss.on('connection', ws => {
   ws.on('error', () => {});
 });
 
-// OPTIMIZATION 5: Keep-alive heartbeat interval to keep WebSocket reverse proxies warm on Render
 const heartbeat = setInterval(() => {
   for (const ws of wss.clients) {
     if (ws.readyState === 1) ws.ping();
