@@ -32,16 +32,18 @@ const PU_INFO = {
   bamboozled: { n: 'Bamboozled', d: 'Inverts your controls briefly' },
 };
 const VARIANTS = [
-  { name: 'Sunny', body: '#f5e4a8', dark: '#595200' },
-  { name: 'Coral', body: '#f4a3a0', dark: '#7a2e2a' },
-  { name: 'Mint', body: '#a8e6c1', dark: '#1f5c3a' },
-  { name: 'Sky', body: '#a8d4f5', dark: '#1e4a73' },
-  { name: 'Grape', body: '#d3b0f2', dark: '#4b2a73' },
-  { name: 'Peach', body: '#ffcf9e', dark: '#7a4a1c' },
-  { name: 'Lime', body: '#d6f58f', dark: '#3f5a0d' },
-  { name: 'Rose', body: '#ff9fcf', dark: '#7a2150' },
-  { name: 'Slate', body: '#b9c2cc', dark: '#2f3b47' },
-  { name: 'Teal', body: '#8fe3e0', dark: '#1b5a58' },
+  { name: 'Original', body: '#f5e4a8', dark: '#595200' },
+  { name: 'Black & White', body: '#ffffff', dark: '#111111' },
+  { name: 'Sunny', body: '#ffd21f', dark: '#5e4a00' },
+  { name: 'Crimson', body: '#f0262e', dark: '#6b0a10' },
+  { name: 'Azure', body: '#1f8fff', dark: '#0a3a80' },
+  { name: 'Lime', body: '#5fdc22', dark: '#1f5a08' },
+  { name: 'Violet', body: '#9b3df2', dark: '#3f1380' },
+  { name: 'Tangerine', body: '#ff8a1a', dark: '#7a3a00' },
+  { name: 'Pink', body: '#ff4fb0', dark: '#7a1259' },
+  { name: 'Teal', body: '#14d1c4', dark: '#07524d' },
+  { name: 'Indigo', body: '#3b46e8', dark: '#131a73' },
+  { name: 'Slate', body: '#8d9aab', dark: '#2a3340' },
 ];
 const BOT_NAMES = ['Gumbo', 'Bubbles', 'Fin', 'Chomp', 'Nibbles', 'Splash', 'Marlin', 'Pebble'];
 
@@ -186,8 +188,19 @@ class Round {
     if (si >= 0) { t.pu.splice(si, 1); t.invuln = 0.9; this.ev('sh', t.x, t.y); if (cause === 'fire') t.burn = 0; return; }
     this.kill(t, by, cause);
   }
+  // where a defeated gum's gravestone stands: where it fell, or the nearest solid ground if it fell into water, a pit or out of bounds
+  placeGrave(p) {
+    const ok = (x, y) => A.freeAt(this.arena, x, y, R_P) && !this.deadlyR(x, y, R_P) && this.inBounds(x, y, 16);
+    if (ok(p.x, p.y)) { p.gx = p.x; p.gy = p.y; return; }
+    for (let d = 8; d < 1000; d += 8) for (let j = 0; j < 16; j++) {
+      const x = p.x + Math.cos(j * Math.PI / 8) * d, y = p.y + Math.sin(j * Math.PI / 8) * d;
+      if (ok(x, y)) { p.gx = x; p.gy = y; return; }
+    }
+    p.gx = p.x; p.gy = p.y;
+  }
   kill(p, by, cause) {
     p.alive = false; p.cause = cause; p.burn = 0; p.frozen = false;
+    this.placeGrave(p);
     this.ev('die', p.x, p.y, cause === 'drop' || cause === 'oob' ? 1 : 0);
     for (const b of p.boom) if (b.s !== 'held') { b.s = 'drop'; b.vx = b.vy = 0; b.fuse = -1; b.dfl = null; }
     if (by && by !== p && cause !== 'drop' && cause !== 'oob' && !this.over && this.set.mode === 'kill') this.scores[by.id] = (this.scores[by.id] || 0) + 1;
@@ -620,6 +633,7 @@ class Round {
         dh: p.dashT > 0 ? 1 : 0, sl: p.slash > 0 ? +(p.slash / SLASH_T).toFixed(2) : 0, bm: p.bam > 0 ? 1 : 0, oo: +(p.oob / 3).toFixed(2),
         iv: p.invuln > 0 ? 1 : 0, pu: p.pu, hd: p.boom.filter(b => b.s === 'held' && !b.temp).length, tk: p.tk ? 1 : 0, cd: +p.dashCd.toFixed(3) };
       // what the owning client needs to keep predicting its own movement from this snapshot
+      if (!p.alive && p.gx !== undefined) { e.gx = rnd(p.gx); e.gy = rnd(p.gy); }   // gravestone spot
       if (p.onIce) e.ic = 1;
       if (p.dashT > 0) { e.dtm = +p.dashT.toFixed(4); e.dd = [+p.ddx.toFixed(4), +p.ddy.toFixed(4)]; }
       pl.push(e);

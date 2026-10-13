@@ -18,38 +18,75 @@ let match = null, infos = [], names = {}, varOf = {};
 let lastSnap = null, lastSnapAt = 0;
 let announcements = [];
 
-// ---------- BGM Playlist & Volume ----------
-const BGM_TRACKS = [
-  '/audio/01. Spilt Milk.mp3',
-  '/audio/05. Smashed Avo.mp3'
-];
-let currentTrackIdx = 0;
-let bgmAudio = null;
-let bgmVol = localStorage.mgVol !== undefined ? +localStorage.mgVol : 0.35;
-
-function initBGM() {
-  if (bgmAudio) return;
-  bgmAudio = new Audio(BGM_TRACKS[currentTrackIdx]);
-  bgmAudio.volume = bgmVol;
-  
-  bgmAudio.addEventListener('ended', () => {
-    currentTrackIdx = (currentTrackIdx + 1) % BGM_TRACKS.length;
-    bgmAudio.src = BGM_TRACKS[currentTrackIdx];
-    bgmAudio.volume = bgmVol;
-    bgmAudio.play().catch(() => {});
-  });
+// ---------- settings (saved in this browser) ----------
+const DEFAULT_BINDS = { up: ['w', 'ArrowUp'], down: ['s', 'ArrowDown'], left: ['a', 'ArrowLeft'], right: ['d', 'ArrowRight'], throw: ['j', ''], slash: ['k', ''], dash: [' ', 'Shift'], recall: ['e', 'r'] };
+const ACTIONS = [['up', 'Move up'], ['down', 'Move down'], ['left', 'Move left'], ['right', 'Move right'], ['throw', 'Throw'], ['slash', 'Melee slash'], ['dash', 'Dash / telekinesis'], ['recall', 'Recall boomerangs']];
+const DEFAULT_CFG = { master: 1, music: 0.35, sfx: 1, quality: 'high', effects: true, water: true, names: true, aimGuide: true, hints: true, ping: true, fps: false };
+let cfg = sanitizeCfg(safeParse(localStorage.mgCfg));
+let binds = loadBinds();
+let keyMap = {};
+function sanitizeCfg(o) {
+  const c = Object.assign({}, DEFAULT_CFG);
+  for (const k of ['master', 'music', 'sfx']) if (typeof o[k] === 'number' && isFinite(o[k])) c[k] = Math.max(0, Math.min(1, o[k]));
+  if (['low', 'medium', 'high'].includes(o.quality)) c.quality = o.quality;
+  for (const k of ['effects', 'water', 'names', 'aimGuide', 'hints', 'ping', 'fps']) if (typeof o[k] === 'boolean') c[k] = o[k];
+  return c;
 }
-
-function playBGM() {
-  ensureAudio();
-  if (bgmAudio && bgmVol > 0 && bgmAudio.paused) {
-    bgmAudio.play().catch(() => {});
+function loadBinds() {
+  const saved = safeParse(localStorage.mgBinds), out = {};
+  for (const [a] of ACTIONS) {
+    const v = saved[a];
+    out[a] = Array.isArray(v) && v.length === 2 && v.every(x => typeof x === 'string' && x.length <= 12) ? v.slice() : DEFAULT_BINDS[a].slice();
   }
+  return out;
 }
+function rebuildKeyMap() { keyMap = {}; for (const [a] of ACTIONS) for (const k of binds[a]) if (k) keyMap[k] = a; }
+rebuildKeyMap();
+const saveCfg = () => { localStorage.mgCfg = JSON.stringify(cfg); };
+const saveBinds = () => { localStorage.mgBinds = JSON.stringify(binds); };
+const normKey = e => e.key.length === 1 ? e.key.toLowerCase() : e.key;
+function keyName(k) {
+  if (!k) return '—';
+  const m = { ' ': 'Space', ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→', Control: 'Ctrl', Backspace: 'Bksp', Escape: 'Esc' };
+  return m[k] || (k.length === 1 ? k.toUpperCase() : k);
+}
+
+// ---------- music: theme in the menu, "Ready Up" in the lobby, the other tracks during matches ----------
+const MUSIC = { menu: '/audio/01. Boomerang Fu Theme.mp3', lobby: '/audio/03. Ready Up.mp3', game: ['/audio/01. Spilt Milk.mp3', '/audio/05. Smashed Avo.mp3'] };
+const HAS_MUSIC = !!(MUSIC.menu || MUSIC.lobby || MUSIC.game.length);
+let musicCtx = 'menu', musicEl = null, musicNow = '', musicLvl = 0, gestured = false, gameIdx = Math.floor(Math.random() * Math.max(1, MUSIC.game.length)) - 1;
+function setMusicCtx(c) {
+  if (c === musicCtx) return;
+  musicCtx = c;
+  if (c === 'game' && MUSIC.game.length) gameIdx = (gameIdx + 1) % MUSIC.game.length;
+}
+const wantTrack = () => musicCtx === 'game' ? (MUSIC.game[gameIdx] || '') : (MUSIC[musicCtx] || '');
+function musicTick() {
+  if (!HAS_MUSIC || !gestured) return;
+  if (!musicEl) {
+    musicEl = new Audio(); musicEl.preload = 'auto'; musicEl.volume = 0;
+    musicEl.addEventListener('ended', () => { if (musicCtx === 'game' && MUSIC.game.length) { gameIdx = (gameIdx + 1) % MUSIC.game.length; musicLvl = 0; } });
+  }
+  const want = wantTrack(), vol = cfg.music * cfg.master;
+  if (want !== musicNow) {                         // fade the old track out, then switch
+    musicLvl = Math.max(0, musicLvl - 0.16);
+    if (musicLvl <= 0) {
+      musicNow = want;
+      if (want) { musicEl.src = want; musicEl.loop = !MUSIC.game.includes(want); if (vol > 0) musicEl.play().catch(() => {}); } else musicEl.pause();
+    }
+  } else if (want) musicLvl = Math.min(1, musicLvl + 0.08);
+  musicEl.volume = Math.max(0, Math.min(1, vol * musicLvl));
+  if (!want || vol <= 0.001) { if (!musicEl.paused) musicEl.pause(); }
+  else if (musicEl.paused && musicNow === want) musicEl.play().catch(() => {});
+}
+setInterval(musicTick, 50);
+function playBGM() { gestured = true; musicTick(); }
+addEventListener('pointerdown', () => { ensureAudio(); playBGM(); });
+const sfxVol = () => cfg.sfx * cfg.master;
 
 // ---------- UI ----------
 const panels = { menu: $('#menu'), setup: $('#setup'), lobby: $('#lobby') };
-function show(p) { const ui = $('#ui'); if (ui) ui.classList.toggle('hidden', !p); for (const k in panels) if (panels[k]) panels[k].classList.toggle('hidden', k !== p); }
+function show(p) { setMusicCtx(p === 'menu' || p === 'setup' ? 'menu' : p === 'lobby' ? 'lobby' : 'game'); const ui = $('#ui'); if (ui) ui.classList.toggle('hidden', !p); for (const k in panels) if (panels[k]) panels[k].classList.toggle('hidden', k !== p); }
 function buildVariantPicker(el, taken, onPick) {
   if (!el) return;
   el.innerHTML = '';
@@ -65,15 +102,6 @@ function pickVariantMenu(i) { myVar = i; localStorage.mgVar = i; buildVariantPic
 if ($('#name')) {
   $('#name').value = myName;
   $('#name').oninput = e => { myName = e.target.value; localStorage.mgName = myName; };
-}
-if ($('#bgmVol')) {
-  $('#bgmVol').value = bgmVol;
-  $('#bgmVol').oninput = e => {
-    bgmVol = +e.target.value;
-    localStorage.mgVol = bgmVol;
-    if (bgmAudio) bgmAudio.volume = bgmVol;
-    if (bgmVol > 0) playBGM();
-  };
 }
 if ($('#variants')) pickVariantMenu(myVar);
 
@@ -133,6 +161,7 @@ if ($('#spStart')) $('#spStart').onclick = () => {
 function startGame(m, inf, set, mt) {
   mode = m; infos = inf; names = {}; varOf = {}; announcements = [];
   for (const i of inf) { names[i.id] = i.name; varOf[i.id] = i.variant; }
+  closeSettings(); setPause(false); releaseInput();
   match = mt; lastSnap = null; myId = m === 'sp' ? 'me' : myId; show(null); if ($('#leave')) $('#leave').classList.remove('hidden'); hintT = performance.now();
   netReset(); if (m === 'mp') wsSend({ t: 'ping', c: performance.now() });
   ensureAudio();
@@ -140,11 +169,12 @@ function startGame(m, inf, set, mt) {
 }
 
 function toMenu(err) {
+  closeSettings(); setPause(false); leaveArmed = false;
   mode = 'menu'; match = null; lastSnap = null; room = null; if ($('#leave')) $('#leave').classList.add('hidden');
   if (ws) { try { ws.close(); } catch (e) {} ws = null; }
   show('menu'); if ($('#menuErr')) $('#menuErr').textContent = err || '';
 }
-if ($('#leave')) $('#leave').onclick = () => { if (mode === 'mp' && ws) { wsSend({ t: 'leave' }); } toMenu(); };
+if ($('#leave')) $('#leave').onclick = () => setPause(true);
 
 // ---------- networking ----------
 function wsSend(o) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); }
@@ -228,26 +258,35 @@ const latch = { t: false, m: false, d: false, r: false };
 let dpr = 1, sc = 1, offX = 0, offY = 0;
 function resize() {
   if (!cv) return;
-  dpr = window.devicePixelRatio || 1; cv.width = innerWidth * dpr; cv.height = innerHeight * dpr; sc = Math.min(cv.width / 960, cv.height / 640); offX = (cv.width - 960 * sc) / 2; offY = (cv.height - 640 * sc) / 2;
+  const nat = window.devicePixelRatio || 1; dpr = cfg.quality === 'low' ? 0.75 : cfg.quality === 'medium' ? Math.min(1, nat) : nat; cv.width = innerWidth * dpr; cv.height = innerHeight * dpr; sc = Math.min(cv.width / 960, cv.height / 640); offX = (cv.width - 960 * sc) / 2; offY = (cv.height - 640 * sc) / 2;
 }
 addEventListener('resize', resize); resize();
-const KEYMAP = { ArrowUp: 'u', ArrowDown: 'd', ArrowLeft: 'l', ArrowRight: 'r', w: 'u', s: 'd', a: 'l', d: 'r', W: 'u', S: 'd', A: 'l', D: 'r' };
+const pressed = new Set();
+function syncKeys() { const dn = a => binds[a].some(k => k && pressed.has(k)); keys.u = dn('up'); keys.d = dn('down'); keys.l = dn('left'); keys.r = dn('right'); keys.dash = dn('dash'); }
+function releaseInput() { pressed.clear(); syncKeys(); lmbHeld = false; recallHold = false; latch.t = latch.m = latch.d = latch.r = false; }
 addEventListener('keydown', e => {
   if (mode !== 'sp' && mode !== 'mp') return;
+  if (uiOpen()) return;
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
-  const k = KEYMAP[e.key]; if (k) { keys[k] = true; e.preventDefault(); }
-  if (e.repeat) return;
-  if (e.key === ' ' || e.key === 'Shift') { latch.d = true; keys.dash = true; e.preventDefault(); }
-  else if (e.key === 'j' || e.key === 'J') { latch.t = true; netAct('t'); }
-  else if (e.key === 'k' || e.key === 'K') { latch.m = true; netAct('m'); }
-  else if (e.key === 'e' || e.key === 'E' || e.key === 'r' || e.key === 'R') { latch.r = true; netAct('r'); }
+  const k = normKey(e), act = keyMap[k];
+  if (act) {
+    pressed.add(k); syncKeys();
+    if (['up', 'down', 'left', 'right', 'dash'].includes(act)) e.preventDefault();
+    if (!e.repeat) {
+      if (act === 'dash') latch.d = true;
+      else if (act === 'throw') { latch.t = true; netAct('t'); }
+      else if (act === 'slash') { latch.m = true; netAct('m'); }
+      else if (act === 'recall') { latch.r = true; netAct('r'); }
+    }
+  }
   ensureAudio(); playBGM();
 });
-addEventListener('keyup', e => { const k = KEYMAP[e.key]; if (k) keys[k] = false; if (e.key === ' ' || e.key === 'Shift') keys.dash = false; });
+addEventListener('keyup', e => { pressed.delete(normKey(e)); syncKeys(); });
 if (cv) {
   addEventListener('mousemove', e => { mouseX = (e.clientX * dpr - offX) / sc; mouseY = (e.clientY * dpr - offY) / sc; haveMouse = true; });
   cv.addEventListener('mousedown', e => {
     if (mode !== 'sp' && mode !== 'mp') return;
+    if (uiOpen()) return;
     if (e.button === 0) { lmbHeld = true; recallHold = !canThrow(lastSnap); }
     else if (e.button === 2) { latch.m = true; netAct('m'); }
     ensureAudio(); playBGM(); e.preventDefault();
@@ -262,12 +301,13 @@ function canThrow(snap) {
   return me.hd > 0 && !(me.pu.includes('multi') && out);
 }
 addEventListener('mouseup', e => { if (e.button === 0 && lmbHeld) { lmbHeld = false; if (!recallHold && (mode === 'sp' || mode === 'mp')) { latch.t = true; netAct('t'); } recallHold = false; } });
-addEventListener('blur', () => { for (const k in keys) keys[k] = false; lmbHeld = false; recallHold = false; });
+addEventListener('blur', releaseInput);
 
 let lastAim = 0;
 function buildInput(snap) {
   const me = snap && snap.pl.find(p => p.id === myId);
   if (me && haveMouse) { const dp = myDisp(me), px = dp[0], py = dp[1]; lastAim = Math.atan2(mouseY - py, mouseX - px); }
+  if (uiOpen()) return { mx: 0, my: 0, aim: lastAim, dh: false, tt: false, mm: false, dd: false, rr: false };   // menu open: stand still, no actions
   const mx = (keys.r ? 1 : 0) - (keys.l ? 1 : 0), my = (keys.d ? 1 : 0) - (keys.u ? 1 : 0);
   return { mx, my, aim: lastAim, dh: !!keys.dash, tt: latch.t, mm: latch.m, dd: latch.d, rr: latch.r || (lmbHeld && recallHold) };
 }
@@ -328,7 +368,7 @@ function mpTick() {
 }
 // Throw / slash / recall don't wait for the next 1/60 s tick: send right away, and show the result locally at once.
 function netAct(kind) {
-  if (mode !== 'mp' || !ws || ws.readyState !== 1) return;
+  if (mode !== 'mp' || !ws || ws.readyState !== 1 || uiOpen()) return;
   const me = mySnap(lastSnap), now = performance.now();
   if (kind === 't' && me && me.al && canThrow(lastSnap)) { NET.thrownAt = now; NET.hdAtThrow = me.hd; NET.thSnd = now; beep(380, 0.1, 'triangle', 0.04, 200); }
   if (kind === 'm' && me && me.al && me.hd > 0 && now - NET.slashAt > 450) { NET.slashAt = now; NET.slSnd = now; beep(250, 0.08, 'square', 0.04, -100); }
@@ -338,18 +378,115 @@ function netAct(kind) {
 }
 function onPong(c) { const rtt = performance.now() - c; if (rtt >= 0 && rtt < 5000) NET.rtt = NET.rtt ? NET.rtt * 0.7 + rtt * 0.3 : rtt; }
 
+
+// ---------- pause menu & settings menu ----------
+let pauseOpen = false, settingsOpen = false, settingsTab = 'audio', capturing = null, leaveArmed = false, lastPauseHtml = '', leaveTimer = 0;
+const uiOpen = () => pauseOpen || settingsOpen;
+function setPause(v) {
+  v = !!v && (mode === 'sp' || mode === 'mp');
+  if (v === pauseOpen) return;
+  pauseOpen = v; const el = $('#pause'); if (el) el.classList.toggle('hidden', !v);
+  leaveArmed = false; const lb = $('#pLeave'); if (lb) lb.textContent = 'Leave game';
+  if (v) { releaseInput(); lastPauseHtml = ''; renderPause(); }
+}
+function renderPause() {
+  const t = $('#pauseTitle'), sub = $('#pauseSub'), list = $('#pplist'); if (!t || !list) return;
+  t.textContent = mode === 'sp' ? 'Paused' : 'Menu';
+  sub.textContent = mode === 'sp' ? 'The game is frozen until you resume.' : 'The match keeps going while this menu is open, so you stand still. Resume quickly!';
+  const snap = lastSnap, byId = {};
+  if (snap) for (const p of snap.pl) if (!p.dc) byId[p.id] = p;
+  const html = infos.map(i => {
+    const p = byId[i.id], alive = p ? !!p.al : true, sc = snap && snap.sc ? (snap.sc[i.id] || 0) : 0;
+    const host = mode === 'mp' && room && room.hostId === i.id ? ' ★' : '';
+    return `<div class="${alive ? '' : 'out'}"><img src="${fishSrc(i.variant)}"><span class="nm">${esc(i.name)}${i.id === myId ? ' (you)' : ''}${host}</span><span class="st">${alive ? '' : 'out'}</span><span class="sc">${sc}</span></div>`;
+  }).join('');
+  if (html !== lastPauseHtml) { lastPauseHtml = html; list.innerHTML = html; }
+}
+function doLeave() { if (mode === 'mp' && ws) wsSend({ t: 'leave' }); toMenu(); }
+if ($('#pResume')) $('#pResume').onclick = () => setPause(false);
+if ($('#pSettings')) $('#pSettings').onclick = () => openSettings();
+if ($('#pLeave')) $('#pLeave').onclick = () => {
+  if (!leaveArmed) { leaveArmed = true; $('#pLeave').textContent = 'Click again to leave'; clearTimeout(leaveTimer); leaveTimer = setTimeout(() => { leaveArmed = false; if ($('#pLeave')) $('#pLeave').textContent = 'Leave game'; }, 3000); return; }
+  doLeave();
+};
+if ($('#btnSettings')) $('#btnSettings').onclick = () => openSettings();
+if ($('#lobSettings')) $('#lobSettings').onclick = () => openSettings();
+
+function openSettings() { settingsOpen = true; releaseInput(); const el = $('#settings'); if (el) el.classList.remove('hidden'); renderSettings(); }
+function closeSettings() { capturing = null; settingsOpen = false; const el = $('#settings'); if (el) el.classList.add('hidden'); }
+if ($('#setClose')) $('#setClose').onclick = closeSettings;
+if ($('#setTabs')) $('#setTabs').addEventListener('click', e => { const b = e.target.closest('[data-tab]'); if (b) { settingsTab = b.dataset.tab; capturing = null; renderSettings(); } });
+
+const pct = v => Math.round(v * 100) + '%';
+function slider(k, label) { return `<div class="setrow"><span>${label}</span><input type="range" min="0" max="1" step="0.05" data-cfg="${k}" value="${cfg[k]}"><span class="val">${pct(cfg[k])}</span></div>`; }
+function check(k, label) { return `<label class="setrow"><span>${label}</span><input type="checkbox" data-cfg="${k}" ${cfg[k] ? 'checked' : ''}></label>`; }
+function renderSettings() {
+  const body = $('#setBody'); if (!body) return;
+  for (const b of document.querySelectorAll('#setTabs [data-tab]')) b.classList.toggle('sel', b.dataset.tab === settingsTab);
+  if (settingsTab === 'audio') {
+    body.innerHTML = slider('master', 'Master volume') + (HAS_MUSIC ? slider('music', 'Music') : '') + slider('sfx', 'Sound effects') +
+      (HAS_MUSIC ? '<div class="setnote">Menu theme in the main menu, "Ready Up" in the lobby, and the other tracks while you play.</div>' : '');
+  } else if (settingsTab === 'graphics') {
+    body.innerHTML = `<label class="setrow"><span>Render quality</span><select data-cfg="quality"><option value="low">Low (75% resolution)</option><option value="medium">Medium (1x)</option><option value="high">High (native)</option></select></label>` +
+      check('effects', 'Hit, bounce and pickup effects') + check('water', 'Animated water') + check('names', 'Player names') + check('aimGuide', 'Aim guide while charging a throw') +
+      check('hints', 'Control hints at match start') + check('ping', 'Show ping (online)') + check('fps', 'Show FPS counter') +
+      `<div class="row"><button type="button" class="sec small" id="btnFull">Toggle fullscreen</button></div>`;
+    const q = body.querySelector('[data-cfg=quality]'); if (q) q.value = cfg.quality;
+  } else {
+    body.innerHTML = ACTIONS.map(([a, label]) => `<div class="keyrow"><span class="lbl">${label}</span>` + [0, 1].map(i => {
+      const cap = capturing && capturing.action === a && capturing.slot === i, k = binds[a][i];
+      return `<button type="button" class="keybtn${cap ? ' cap' : ''}${!k && !cap ? ' empty' : ''}" data-act="${a}" data-slot="${i}">${cap ? 'press a key…' : keyName(k)}</button>`;
+    }).join('') + '</div>').join('') +
+      `<div class="setnote">Click a key, then press the new one (Backspace clears it, Esc cancels). Mouse: hold left click to aim and release to throw, hold it with nothing in hand to recall, right click to slash. Esc opens the pause menu.</div>` +
+      `<div class="row"><button type="button" class="sec small" id="btnResetKeys">Reset controls to default</button></div>`;
+  }
+}
+if ($('#setBody')) {
+  $('#setBody').addEventListener('input', e => {
+    const k = e.target.dataset.cfg; if (!k || e.target.type !== 'range') return;
+    cfg[k] = +e.target.value; saveCfg(); const v = e.target.parentNode.querySelector('.val'); if (v) v.textContent = pct(cfg[k]);
+    musicTick(); if (k !== 'music') { ensureAudio(); beep(660, 0.08, 'triangle', 0.06, 200); }
+  });
+  $('#setBody').addEventListener('change', e => {
+    const k = e.target.dataset.cfg; if (!k || e.target.type === 'range') return;
+    cfg[k] = e.target.type === 'checkbox' ? e.target.checked : e.target.value; saveCfg(); if (k === 'quality') resize();
+  });
+  $('#setBody').addEventListener('click', e => {
+    const kb = e.target.closest('.keybtn');
+    if (kb) { capturing = { action: kb.dataset.act, slot: +kb.dataset.slot }; renderSettings(); return; }
+    if (e.target.id === 'btnResetKeys') { binds = {}; for (const [a] of ACTIONS) binds[a] = DEFAULT_BINDS[a].slice(); saveBinds(); rebuildKeyMap(); renderSettings(); }
+    if (e.target.id === 'btnFull') { try { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen(); } catch (er) {} }
+  });
+}
+function setBind(action, slot, key) {
+  if (key) for (const [a] of ACTIONS) for (let i = 0; i < 2; i++) if (binds[a][i] === key) binds[a][i] = '';   // a key can only do one thing
+  binds[action][slot] = key; saveBinds(); rebuildKeyMap(); syncKeys();
+}
+// Esc: close settings, else open/close the pause menu. Runs first (capture phase) so it also works while rebinding.
+addEventListener('keydown', e => {
+  if (capturing) {
+    e.preventDefault(); e.stopPropagation();
+    if (e.key !== 'Escape') { if (e.key === 'Backspace' || e.key === 'Delete') setBind(capturing.action, capturing.slot, ''); else if (!['Meta', 'ContextMenu'].includes(e.key)) setBind(capturing.action, capturing.slot, normKey(e)); }
+    capturing = null; renderSettings(); return;
+  }
+  if (e.key === 'Escape') {
+    if (e.repeat) return;
+    if (settingsOpen) { closeSettings(); e.preventDefault(); }
+    else if (mode === 'sp' || mode === 'mp') { setPause(!pauseOpen); e.preventDefault(); }
+  }
+}, true);
+
 // ---------- audio ----------
 let actx = null;
 function ensureAudio() { 
   try { 
     if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)(); 
     if (actx.state === 'suspended') actx.resume(); 
-    initBGM();
   } catch (e) {} 
 }
 
 function beep(f, d, type, vol, slide) {
-  if (!actx) return; const t = actx.currentTime, o = actx.createOscillator(), g = actx.createGain();
+  if (!actx || sfxVol() <= 0.001) return; vol = (vol || 0.05) * sfxVol(); const t = actx.currentTime, o = actx.createOscillator(), g = actx.createGain();
   o.type = type || 'square'; o.frequency.setValueAtTime(f, t); if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(30, f + slide), t + d);
   g.gain.setValueAtTime(vol || 0.05, t); g.gain.exponentialRampToValueAtTime(0.0001, t + d); o.connect(g); g.connect(actx.destination); o.start(t); o.stop(t + d);
 }
@@ -422,6 +559,22 @@ function drawDisguise(k, x, y) {
 }
 
 let hintT = 0;
+const DECOR_FX = new Set(['hit', 'sh', 'pk', 'tp', 'bnc', 'sl']);
+const graveSeen = {};
+const easeBack = t => { const c = 1.9; return 1 + (c + 1) * Math.pow(t - 1, 3) + c * Math.pow(t - 1, 2); };
+function drawGrave(x, y, v, name, age) {
+  const col = v ? v.body : '#bbb', dk = v ? v.dark : '#555', k = age < 0.4 ? Math.max(0.01, easeBack(age / 0.4)) : 1;
+  ctx.save(); ctx.translate(x, y + 16); ctx.scale(1.3, 1.3 * k);
+  ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.beginPath(); ctx.ellipse(2, 1, 19, 6, 0, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(-13, -3); ctx.lineTo(-13, -27); ctx.arc(0, -27, 13, Math.PI, 0); ctx.lineTo(13, -3); ctx.closePath();
+  ctx.fillStyle = col; ctx.fill(); ctx.lineWidth = 3; ctx.lineJoin = 'round'; ctx.strokeStyle = dk; ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,0.28)'; ctx.fillRect(-9, -33, 4, 24);
+  ctx.fillStyle = dk; ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic'; ctx.fillText('RIP', 1, -26);
+  ctx.fillRect(-1.5, -22, 3, 11); ctx.fillRect(-5, -19, 10, 3);
+  ctx.fillStyle = '#6b4a2b'; ctx.beginPath(); ctx.ellipse(0, -2, 19, 6, 0, 0, 7); ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = '#3d2813'; ctx.stroke();
+  ctx.restore();
+  if (cfg.names && name) { ctx.save(); ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center'; ctx.lineWidth = 3; ctx.strokeStyle = '#120b1c'; ctx.fillStyle = '#fff'; ctx.globalAlpha = 0.8; ctx.strokeText(name, x, y + 34); ctx.fillText(name, x, y + 34); ctx.restore(); }
+}
 function pos(p, age) { const a = Math.min(age, 0.07); return [p.x + p.vx * a, p.y + p.vy * a]; }
 
 function draw(snap, age, now) {
@@ -437,7 +590,7 @@ function draw(snap, age, now) {
   if (arena) {
     for (const q of arena.water) {
       ctx.save(); ctx.beginPath(); ctx.rect(q.x, q.y, q.w, q.h); ctx.clip(); ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 2;
-      for (let y = q.y + 10; y < q.y + q.h; y += 18) { ctx.beginPath(); for (let x = q.x; x <= q.x + q.w; x += 8) { const yy = y + Math.sin(x * 0.08 + now / 400 + y) * 2.5; x === q.x ? ctx.moveTo(x, yy) : ctx.lineTo(x, yy); } ctx.stroke(); }
+      for (let y = q.y + 10; y < q.y + q.h; y += 18) { ctx.beginPath(); for (let x = q.x; x <= q.x + q.w; x += 8) { const yy = y + Math.sin(x * 0.08 + (cfg.water ? now / 400 : 0) + y) * 2.5; x === q.x ? ctx.moveTo(x, yy) : ctx.lineTo(x, yy); } ctx.stroke(); }
       ctx.restore();
     }
   }
@@ -456,6 +609,11 @@ function draw(snap, age, now) {
     const by = k[1] + Math.sin(now / 250 + k[0]) * 3;
     ctx.fillStyle = 'rgba(120,200,255,0.35)'; ctx.beginPath(); ctx.arc(k[0], by, 20 + Math.sin(now / 200) * 2, 0, 7); ctx.fill();
     ctx.fillStyle = '#2f6fe0'; ctx.fillRect(k[0] - 10, by - 12, 20, 24); ctx.fillStyle = '#1c3f94'; ctx.fillRect(k[0] - 10, by - 12, 5, 24); ctx.fillStyle = '#fff'; ctx.fillRect(k[0] - 2, by - 6, 9, 2); ctx.fillRect(k[0] - 2, by - 1, 9, 2); ctx.strokeStyle = '#0d2260'; ctx.lineWidth = 2; ctx.strokeRect(k[0] - 10, by - 12, 20, 24);
+  }
+
+  for (const p of snap.pl) if (!p.dc && !p.al && p.gx !== undefined) {   // gravestones of the defeated, in their colour
+    const key = p.id + ':' + snap.rd; if (graveSeen[key] === undefined) graveSeen[key] = now;
+    drawGrave(p.gx, p.gy, V[p.v], names[p.id], (now - graveSeen[key]) / 1000);
   }
 
   const real = snap.pl.filter(p => !p.dc);
@@ -486,11 +644,11 @@ function draw(snap, age, now) {
     if (p.bn) for (let i = 0; i < 4; i++) { const f = Math.sin(now / 60 + i * 2); ctx.fillStyle = `rgba(255,${120 + i * 30},20,0.85)`; ctx.beginPath(); ctx.arc(x - 12 + i * 8, y - 6 + f * 4 - i % 2 * 6, 6 - i * 0.4, 0, 7); ctx.fill(); }
     if (p.sh) { ctx.strokeStyle = 'rgba(120,230,255,0.9)'; ctx.fillStyle = 'rgba(120,230,255,0.18)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(x, y, 24, 0, 7); ctx.fill(); ctx.stroke(); }
     if (p.tk) { ctx.strokeStyle = '#d68bff'; ctx.lineWidth = 2; ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.arc(x, y, 260, 0, 7); ctx.stroke(); ctx.setLineDash([]); }
-    if (lmbHeld && !recallHold && p.id === myId) { ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 3; ctx.setLineDash([2, 10]); ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(x + Math.cos(aimAngle) * 26, y + Math.sin(aimAngle) * 26); ctx.lineTo(x + Math.cos(aimAngle) * 190, y + Math.sin(aimAngle) * 190); ctx.stroke(); ctx.setLineDash([]); ctx.lineCap = 'butt'; }
+    if (lmbHeld && !recallHold && cfg.aimGuide && p.id === myId) { ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 3; ctx.setLineDash([2, 10]); ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(x + Math.cos(aimAngle) * 26, y + Math.sin(aimAngle) * 26); ctx.lineTo(x + Math.cos(aimAngle) * 190, y + Math.sin(aimAngle) * 190); ctx.stroke(); ctx.setLineDash([]); ctx.lineCap = 'butt'; }
     const slv = shownSlash(p, now);
     if (slv > 0) { ctx.strokeStyle = `rgba(255,255,255,${slv})`; ctx.lineWidth = 6; ctx.beginPath(); ctx.arc(x, y, 38, aimAngle - 1.3 + (1 - slv) * 0.8, aimAngle + 1.3 - slv * 0.2 * 0); ctx.stroke(); }
     if (p.bm) { ctx.fillStyle = '#ff6b6b'; ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('?!', x, y - 32); }
-    if (!p.dc) {
+    if (!p.dc && cfg.names) {
       ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'center'; ctx.lineWidth = 3; ctx.strokeStyle = '#120b1c'; ctx.fillStyle = p.id === myId ? '#ffc83b' : '#fff';
       const nm = names[p.id] || ''; ctx.strokeText(nm, x, y - 28); ctx.fillText(nm, x, y - 28);
     }
@@ -506,6 +664,7 @@ function draw(snap, age, now) {
 
   fx = fx.filter(f => now - f.t0 < f.life);
   for (const f of fx) {
+    if (!cfg.effects && DECOR_FX.has(f.k)) continue;
     const t = (now - f.t0) / f.life; ctx.save(); ctx.globalAlpha = 1 - t;
     if (f.k === 'ex') { ctx.fillStyle = '#ffb02e'; ctx.beginPath(); ctx.arc(f.x, f.y, 80 * t + 10, 0, 7); ctx.fill(); ctx.strokeStyle = '#fff3a0'; ctx.lineWidth = 6; ctx.stroke(); }
     else if (f.k === 'die') { ctx.strokeStyle = f.w ? '#bfe6ff' : '#ff5a4a'; ctx.lineWidth = 4; for (let i = 0; i < 8; i++) { const a = i * 0.785 + t; ctx.beginPath(); ctx.moveTo(f.x + Math.cos(a) * 10, f.y + Math.sin(a) * 10); ctx.lineTo(f.x + Math.cos(a) * (14 + 40 * t), f.y + Math.sin(a) * (14 + 40 * t)); ctx.stroke(); } }
@@ -524,8 +683,9 @@ function drawHUD(snap, me, now) {
   if (!ctx) return;
   ctx.setTransform(sc, 0, 0, sc, offX, offY);
   ctx.textBaseline = 'alphabetic';
-  if (mode === 'mp' && NET.rtt) { ctx.save(); ctx.textAlign = 'right'; ctx.font = 'bold 12px sans-serif'; ctx.fillStyle = NET.rtt < 60 ? '#7fe08a' : NET.rtt < 120 ? '#ffc83b' : '#ff7a6b'; ctx.fillText(Math.round(NET.rtt) + ' ms', 952, 634); ctx.restore(); }
+  if (mode === 'mp' && NET.rtt && cfg.ping) { ctx.save(); ctx.textAlign = 'right'; ctx.font = 'bold 12px sans-serif'; ctx.fillStyle = NET.rtt < 60 ? '#7fe08a' : NET.rtt < 120 ? '#ffc83b' : '#ff7a6b'; ctx.fillText(Math.round(NET.rtt) + ' ms', 952, 634); ctx.restore(); }
 
+  if (cfg.fps) { ctx.save(); ctx.textAlign = 'left'; ctx.font = 'bold 12px sans-serif'; ctx.fillStyle = 'rgba(255,255,255,0.8)'; ctx.fillText(fps + ' fps', 8, 634); ctx.restore(); }
   const real = snap.pl.filter(p => !p.dc);
   ctx.font = 'bold 15px sans-serif'; ctx.textAlign = 'left';
   real.forEach((p, i) => {
@@ -561,15 +721,18 @@ function drawHUD(snap, me, now) {
   if (snap.ph === 'countdown') { big(String(Math.ceil(snap.tm)), 330); ctx.font = 'bold 20px sans-serif'; ctx.fillStyle = '#fff'; ctx.fillText(`Round ${snap.rd}`, 480, 270); }
   else if (snap.ph === 'over') big(snap.w ? `${names[snap.w] || '?'} wins the round!` : 'Draw!', 330);
   else if (snap.ph === 'end') { big(`${names[snap.ch] || '?'} wins the match!`, 320, '#7fe08a'); ctx.font = 'bold 20px sans-serif'; ctx.fillStyle = '#fff'; ctx.fillText('Returning to ' + (mode === 'mp' ? 'lobby' : 'menu') + '…', 480, 370); }
-  if (performance.now() - hintT < 12000 && snap.ph !== 'end') { ctx.font = '13px sans-serif'; ctx.fillStyle = 'rgba(255,255,255,0.75)'; ctx.fillText('WASD move · aim mouse · hold + release click to throw · hold click to recall · right-click slash · Space dash', 480, 586); }
+  if (cfg.hints && performance.now() - hintT < 12000 && snap.ph !== 'end') { ctx.font = '13px sans-serif'; ctx.fillStyle = 'rgba(255,255,255,0.75)'; ctx.fillText('WASD move · aim mouse · hold + release click to throw · hold click to recall · right-click slash · Space dash', 480, 586); }
 }
 
 // ---------- main loop ----------
-let lastT = performance.now(), acc = 0, netAcc = 0;
+let lastT = performance.now(), acc = 0, netAcc = 0, fps = 0, fpsN = 0, fpsT = performance.now(), pauseRenderT = 0;
 function frame(nowT) {
   const dtReal = Math.min(0.1, (nowT - lastT) / 1000); lastT = nowT;
   let snap = null, age = 0;
-  if (mode === 'sp' && match) {
+  fpsN++; if (nowT - fpsT >= 500) { fps = Math.round(fpsN * 1000 / (nowT - fpsT)); fpsN = 0; fpsT = nowT; }
+  if (pauseOpen && nowT - pauseRenderT > 250) { pauseRenderT = nowT; renderPause(); }
+  if (mode === 'sp' && match && pauseOpen) { snap = lastSnap; acc = 0; }   // single player: the game is frozen while the pause menu is open
+  else if (mode === 'sp' && match) {
     const inp = buildInput(lastSnap);
     match.input('me', { mx: inp.mx, my: inp.my, aim: inp.aim, dh: inp.dh, t: inp.tt, m: inp.mm, d: inp.dd, r: inp.rr });
     latch.t = latch.m = latch.d = latch.r = false;

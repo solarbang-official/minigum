@@ -30,6 +30,20 @@ WebSocket upgrades (the client uses `wss://` automatically on https pages). Ngin
   or the screen edge bounces off at half speed (it halves again on each bounce), up to 3 bounces. The next wall it
   touches after that stops it, as before. Total flight range is unchanged. Slash deflections reset the bounce count.
 
+## Music, settings and the pause menu
+
+- **Music** (files in `public/audio/`): the main menu plays `01. Boomerang Fu Theme.mp3`, the lobby plays `03. Ready Up.mp3`,
+  and matches play `01. Spilt Milk.mp3` / `05. Smashed Avo.mp3` in turn. To change a track, edit the `MUSIC` table near the top of
+  `public/client.js`. Browsers only start audio after the first click or key press.
+- **Settings** (main menu, lobby, and the pause menu; saved in the browser): *Audio* (master, music, sound effects),
+  *Graphics* (render quality, effects, animated water, names, aim guide, hints, ping, FPS counter, fullscreen) and
+  *Controls* (every keyboard action has two rebindable slots; Backspace clears one; Esc is always the pause key).
+- **Esc / Menu button**: in single player the game pauses. Online, the same menu opens but the match keeps running and your
+  fish stands still (and can be hit), so close it quickly. The menu lists everyone playing with their gum, and has
+  Resume, Settings and Leave game (asks for a second click).
+- **Gravestones**: a defeated gum leaves a gravestone in its colour for the rest of the round, on the nearest solid ground
+  if it fell into water, a pit or out of bounds.
+
 ## Controls
 
 | Action | Keys |
