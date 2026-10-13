@@ -4,41 +4,213 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
 <title>MiniGums</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&display=swap" rel="stylesheet">
 <style>
-  :root { --bg:#12303a; --panel:#1c4452; --ink:#f3f7f4; --muted:#9bc2c9; --accent:#ffcf4a; }
+  :root { 
+    --bg: #1c1427; 
+    --panel: #2d1f3d; 
+    --panel-dark: #1b1226;
+    --border: #120b1c; 
+    --ink: #f8f5fc; 
+    --muted: #b09ebf; 
+    --accent: #ffc83b; 
+    --accent-dark: #d49f17;
+    --sec: #9b51e0; 
+    --sec-dark: #7033a8;
+    --danger: #ff5252;
+  }
   * { box-sizing: border-box; }
-  html,body { margin:0; height:100%; background:#0c2027; color:var(--ink); font-family: "Trebuchet MS", system-ui, sans-serif; overflow:hidden; }
-  canvas { position:fixed; inset:0; width:100%; height:100%; display:block; }
-  #ui { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; background:radial-gradient(circle at 50% 30%, #1d5a6a, #0c2027 70%); overflow:auto; padding:16px; }
-  #ui.hidden, .hidden { display:none !important; }
-  .panel { background:var(--panel); border:3px solid #0c2027; border-radius:16px; padding:22px 26px; width:min(520px,100%); box-shadow:0 10px 0 #0c2027; max-height:92vh; overflow-y:auto; }
-  h1 { margin:0 0 4px; font-size:44px; letter-spacing:1px; color:var(--accent); text-shadow:0 4px 0 #0c2027; }
-  h2 { margin:0 0 10px; }
-  .sub { color:var(--muted); margin:0 0 16px; }
-  label { display:flex; justify-content:space-between; align-items:center; gap:12px; margin:8px 0; }
-  input[type=text], input[type=number], input[type=range], select { background:#0f2b34; color:var(--ink); border:2px solid #2d6272; border-radius:8px; padding:7px 9px; font:inherit; min-width:150px; }
-  input[type=checkbox] { width:22px; height:22px; }
-  button { font:inherit; font-weight:bold; background:var(--accent); color:#3a2a00; border:0; border-radius:10px; padding:10px 16px; cursor:pointer; box-shadow:0 4px 0 #a47e0f; }
-  button:active { transform:translateY(3px); box-shadow:0 1px 0 #a47e0f; }
-  button.sec { background:#3f7c8c; color:#fff; box-shadow:0 4px 0 #265563; }
-  button:disabled { opacity:.5; cursor:default; }
-  .row { display:flex; gap:10px; flex-wrap:wrap; margin-top:12px; }
-  .row > * { flex:1; }
-  #variants { display:flex; flex-wrap:wrap; gap:6px; margin:6px 0 14px; }
-  .vsw { width:52px; height:48px; border-radius:10px; border:3px solid transparent; background:#0f2b34; display:flex; align-items:center; justify-content:center; cursor:pointer; padding:0; }
-  .vsw img { width:40px; height:36px; }
-  .vsw.sel { border-color:var(--accent); }
-  .vsw.taken { opacity:.25; cursor:default; }
-  #plist div { display:flex; align-items:center; gap:10px; padding:5px 0; font-size:18px; }
-  #plist img { width:32px; height:28px; }
-  .code { font-size:44px; letter-spacing:8px; color:var(--accent); font-weight:bold; text-align:center; margin:4px 0 8px; }
-  .err { color:#ff9c8f; min-height:20px; margin-top:8px; }
-  #leave { position:fixed; top:8px; right:8px; z-index:5; padding:6px 12px; font-size:14px; opacity:.8; }
-  .hint { color:var(--muted); font-size:13px; margin-top:12px; line-height:1.5; }
-  .pu-header { margin-top:14px; font-weight:bold; font-size:15px; color:var(--accent); }
-  .pu-grid { display:grid; grid-template-columns:repeat(2, 1fr); gap:6px 12px; margin:6px 0 12px; background:#0f2b34; padding:10px 12px; border-radius:10px; border:2px solid #2d6272; max-height:160px; overflow-y:auto; }
-  .pu-grid label { font-size:13px; margin:0; justify-content:flex-start; gap:8px; cursor:pointer; }
-  .pu-grid input[type=checkbox] { width:16px; height:16px; min-width:auto; }
+  html, body { 
+    margin: 0; 
+    height: 100%; 
+    background: var(--bg); 
+    color: var(--ink); 
+    font-family: 'Fredoka', system-ui, sans-serif; 
+    overflow: hidden; 
+    user-select: none;
+  }
+  canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  
+  #ui { 
+    position: fixed; 
+    inset: 0; 
+    display: flex; 
+    align-items: center; 
+    justify-content: center; 
+    background: radial-gradient(circle at 50% 35%, #42295c 0%, #1c1427 80%); 
+    overflow: auto; 
+    padding: 16px; 
+  }
+  #ui.hidden, .hidden { display: none !important; }
+  
+  /* Scrollbar customization */
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: var(--panel-dark); border-radius: 8px; }
+  ::-webkit-scrollbar-thumb { background: var(--sec); border-radius: 8px; border: 2px solid var(--panel-dark); }
+  ::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+
+  .panel { 
+    background: var(--panel); 
+    border: 4px solid var(--border); 
+    border-radius: 24px; 
+    padding: 26px 30px; 
+    width: min(520px, 100%); 
+    box-shadow: 0 12px 0 var(--border), 0 20px 30px rgba(0,0,0,0.5); 
+    max-height: 90vh; 
+    overflow-y: auto; 
+    position: relative;
+  }
+  
+  h1 { 
+    margin: 0 0 2px; 
+    font-size: 52px; 
+    font-weight: 700;
+    letter-spacing: 1.5px; 
+    color: var(--accent); 
+    text-shadow: 0 5px 0 var(--border), 0 8px 15px rgba(0,0,0,0.4); 
+    text-align: center;
+    transform: rotate(-1.5deg);
+  }
+  h2 { 
+    margin: 0 0 12px; 
+    font-size: 32px;
+    color: var(--accent);
+    text-shadow: 0 3px 0 var(--border);
+    text-align: center;
+  }
+  .sub { 
+    color: var(--muted); 
+    margin: 0 0 18px; 
+    text-align: center;
+    font-size: 16px;
+  }
+  
+  label.field-label { 
+    display: flex; 
+    justify-content: space-between; 
+    align-items: center; 
+    gap: 12px; 
+    margin: 10px 0; 
+    font-size: 15px;
+    font-weight: 600;
+  }
+  
+  input[type=text], input[type=number], input[type=range], select { 
+    background: var(--panel-dark); 
+    color: var(--ink); 
+    border: 3px solid #483260; 
+    border-radius: 12px; 
+    padding: 8px 12px; 
+    font: inherit; 
+    font-size: 14px;
+    min-width: 160px; 
+    outline: none;
+    transition: border-color 0.15s ease, transform 0.15s ease;
+  }
+  input[type=text]:focus, input[type=number]:focus, select:focus {
+    border-color: var(--accent);
+    transform: scale(1.02);
+  }
+  
+  button { 
+    font: inherit; 
+    font-weight: 700; 
+    font-size: 16px;
+    background: var(--accent); 
+    color: #2b1f00; 
+    border: 3px solid var(--border); 
+    border-radius: 14px; 
+    padding: 12px 18px; 
+    cursor: pointer; 
+    box-shadow: 0 6px 0 var(--border); 
+    transition: transform 0.08s ease, box-shadow 0.08s ease, background 0.15s ease;
+  }
+  button:hover { background: #ffe17d; transform: translateY(-2px); box-shadow: 0 8px 0 var(--border); }
+  button:active { transform: translateY(4px); box-shadow: 0 2px 0 var(--border); }
+  button.sec { 
+    background: var(--sec); 
+    color: #fff; 
+    box-shadow: 0 6px 0 var(--border); 
+  }
+  button.sec:hover { background: #b065f5; }
+  button:disabled { opacity: .4; cursor: not-allowed; transform: none !important; box-shadow: 0 6px 0 var(--border) !important; }
+  
+  .row { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
+  .row > * { flex: 1; }
+  
+  #variants, #variants2 { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 16px; justify-content: center; }
+  .vsw { 
+    width: 54px; 
+    height: 50px; 
+    border-radius: 14px; 
+    border: 3px solid var(--border); 
+    background: var(--panel-dark); 
+    display: flex; 
+    align-items: center; 
+    justify-content: center; 
+    cursor: pointer; 
+    padding: 0; 
+    box-shadow: 0 4px 0 var(--border);
+  }
+  .vsw img { width: 42px; height: 38px; filter: drop-shadow(0 2px 0 rgba(0,0,0,0.3)); }
+  .vsw.sel { border-color: var(--accent); background: #482f63; transform: translateY(-3px); box-shadow: 0 7px 0 var(--border); }
+  .vsw.taken { opacity: .25; cursor: default; }
+  
+  #plist div { display: flex; align-items: center; gap: 12px; padding: 6px 10px; font-size: 18px; background: var(--panel-dark); border-radius: 12px; margin-bottom: 6px; border: 2px solid #432a5e; }
+  #plist img { width: 34px; height: 30px; }
+  
+  .code { 
+    font-size: 48px; 
+    letter-spacing: 10px; 
+    color: var(--accent); 
+    font-weight: 700; 
+    text-align: center; 
+    margin: 4px 0 10px; 
+    text-shadow: 0 4px 0 var(--border);
+  }
+  .err { color: var(--danger); min-height: 20px; margin-top: 10px; text-align: center; font-weight: 600; }
+  
+  #leave { position: fixed; top: 12px; right: 12px; z-index: 5; padding: 8px 16px; font-size: 14px; }
+  .hint { color: var(--muted); font-size: 13px; margin-top: 16px; line-height: 1.5; background: var(--panel-dark); padding: 10px 14px; border-radius: 12px; border: 2px solid #432a5e; }
+  
+  .pu-header { margin-top: 16px; font-weight: 700; font-size: 16px; color: var(--accent); text-shadow: 0 2px 0 var(--border); }
+  .pu-grid { 
+    display: grid; 
+    grid-template-columns: repeat(2, 1fr); 
+    gap: 8px; 
+    margin: 8px 0 14px; 
+    background: var(--panel-dark); 
+    padding: 12px; 
+    border-radius: 14px; 
+    border: 3px solid #432a5e; 
+    max-height: 180px; 
+    overflow-y: auto; 
+  }
+  .pu-chip { 
+    display: flex; 
+    align-items: center; 
+    gap: 8px; 
+    background: #251838; 
+    padding: 6px 10px; 
+    border-radius: 10px; 
+    border: 2px solid #462c66; 
+    font-size: 13px; 
+    cursor: pointer; 
+    transition: background 0.12s ease, border-color 0.12s ease;
+  }
+  .pu-chip:has(input:checked) {
+    background: #46286b;
+    border-color: var(--accent);
+  }
+  .pu-chip input[type=checkbox] { 
+    width: 18px; 
+    height: 18px; 
+    min-width: auto; 
+    accent-color: var(--accent); 
+    cursor: pointer;
+  }
 </style>
 </head>
 <body>
@@ -48,9 +220,9 @@
   <div id="menu" class="panel">
     <h1>MiniGums</h1>
     <p class="sub">Throw. Slash. Survive.</p>
-    <label>Name <input id="name" type="text" maxlength="14" placeholder="Your name"></label>
-    <label>Music Volume <input id="bgmVol" type="range" min="0" max="1" step="0.05" value="0.35"></label>
-    <div class="sub" style="margin:8px 0 0">Pick your gum</div>
+    <label class="field-label">Name <input id="name" type="text" maxlength="14" placeholder="Your name"></label>
+    <label class="field-label">Music Volume <input id="bgmVol" type="range" min="0" max="1" step="0.05" value="0.35"></label>
+    <div class="sub" style="margin: 12px 0 0; font-weight: 600; color: var(--accent);">Pick your gum</div>
     <div id="variants"></div>
     <div class="row"><button id="btnSP">Single Player</button></div>
     <div class="row"><button id="btnCreate" class="sec">Create Online Room</button></div>
@@ -59,22 +231,28 @@
       <button id="btnJoin" class="sec">Join Room</button>
     </div>
     <div class="err" id="menuErr"></div>
-    <div class="hint"><b>Move</b> WASD / arrows &nbsp; <b>Aim</b> mouse &nbsp; <b>Throw</b> hold click, release / J &nbsp; <b>Slash</b> right-click / K<br>
-      <b>Dash</b> Space / Shift &nbsp; <b>Recall</b> hold click with no boomerang, or E / R</div>
+    <div class="hint">
+      <b>Move</b> WASD / Arrows &nbsp; <b>Aim</b> Mouse<br>
+      <b>Throw</b> Hold & release Click / J &nbsp; <b>Slash</b> Right-Click / K<br>
+      <b>Dash</b> Space / Shift &nbsp; <b>Recall</b> Hold Click / E / R
+    </div>
   </div>
 
   <div id="setup" class="panel hidden">
     <h2>Single Player</h2>
     <div id="spForm"></div>
-    <div class="row"><button id="spStart">Start</button><button id="spBack" class="sec">Back</button></div>
+    <div class="row"><button id="spStart">Start Match</button><button id="spBack" class="sec">Back</button></div>
   </div>
 
   <div id="lobby" class="panel hidden">
-    <h2>Room</h2>
+    <h2>Room Lobby</h2>
     <div class="code" id="lobCode">----</div>
-    <p class="sub" style="text-align:center">Share this code with friends (up to 6 players).</p>
+    <p class="sub">Share this code with friends (up to 6 players).</p>
     <div id="plist"></div>
-    <div id="lobVariants" style="margin-top:8px"><div class="sub" style="margin:0">Your gum</div><div id="variants2" style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0"></div></div>
+    <div id="lobVariants" style="margin-top:10px">
+      <div class="sub" style="margin:0; font-weight: 600; color: var(--accent);">Your gum</div>
+      <div id="variants2"></div>
+    </div>
     <div id="lobForm"></div>
     <div class="row"><button id="lobStart">Start Match</button><button id="lobLeave" class="sec">Leave</button></div>
     <div class="hint" id="lobHint"></div>

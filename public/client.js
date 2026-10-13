@@ -81,17 +81,17 @@ function formHTML(botsLabel, botsMin) {
   const arenas = (A && A.list) ? A.list : [];
   const puIds = (G && G.PU_IDS) ? G.PU_IDS : [];
   const puInfo = (G && G.PU_INFO) ? G.PU_INFO : {};
-  return `<label>Arena <select data-k="arena"><option value="random">Random</option>${arenas.map((a, i) => `<option value="${i}">${i + 1}. ${a.name}</option>`).join('')}</select></label>
-  <label>Scoring <select data-k="mode"><option value="last">Last one standing</option><option value="kill">Point per kill</option></select></label>
-  <label>Points to win <input data-k="target" type="number" min="1" max="25"></label>
-  <label>Blue book spawn <select data-k="books"><option value="off">Off</option><option value="slow">Slow</option><option value="normal">Normal</option><option value="fast">Fast</option></select></label>
-  <label>Boomerang Speed <select data-k="boomSpeed"><option value="slow">Slow</option><option value="normal">Normal</option><option value="fast">Fast</option><option value="insane">Insane</option></select></label>
-  <label>Losers start with shield <input data-k="underdog" type="checkbox"></label>
-  <label>AI skill <select data-k="ai"><option value="0">Easy</option><option value="1">Normal</option><option value="2">Hard</option></select></label>
-  <label>${botsLabel} <input data-k="bots" type="number" min="${botsMin}" max="5"></label>
-  <div class="pu-header">Enabled Powerups</div>
+  return `<label class="field-label">Arena <select data-k="arena"><option value="random">🎲 Random</option>${arenas.map((a, i) => `<option value="${i}">${i + 1}. ${a.name}</option>`).join('')}</select></label>
+  <label class="field-label">Scoring <select data-k="mode"><option value="last">👑 Last one standing</option><option value="kill">⚔️ Point per kill</option></select></label>
+  <label class="field-label">Points to win <input data-k="target" type="number" min="1" max="25"></label>
+  <label class="field-label">Blue book spawn <select data-k="books"><option value="off">Off</option><option value="slow">Slow</option><option value="normal">Normal</option><option value="fast">Fast</option></select></label>
+  <label class="field-label">Boomerang Speed <select data-k="boomSpeed"><option value="slow">Slow</option><option value="normal">Normal</option><option value="fast">Fast</option><option value="insane">Insane</option></select></label>
+  <label class="field-label">Losers start with shield <input data-k="underdog" type="checkbox"></label>
+  <label class="field-label">AI skill <select data-k="ai"><option value="0">Easy</option><option value="1">Normal</option><option value="2">Hard</option></select></label>
+  <label class="field-label">${botsLabel} <input data-k="bots" type="number" min="${botsMin}" max="5"></label>
+  <div class="pu-header">⚡ Enabled Powerups</div>
   <div class="pu-grid">
-    ${puIds.map(id => `<label><input type="checkbox" data-pu="${id}"> ${puInfo[id] ? puInfo[id].n : id}</label>`).join('')}
+    ${puIds.map(id => `<label class="pu-chip"><input type="checkbox" data-pu="${id}"> <span>${puInfo[id] ? puInfo[id].n : id}</span></label>`).join('')}
   </div>`;
 }
 
@@ -326,7 +326,7 @@ function pos(p, age) { const a = Math.min(age, 0.07); return [p.x + p.vx * a, p.
 
 function draw(snap, age, now) {
   if (!ctx) return;
-  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = '#0c2027'; ctx.fillRect(0, 0, cv.width, cv.height);
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = '#1c1427'; ctx.fillRect(0, 0, cv.width, cv.height);
   if (!snap) { ctx.fillStyle = '#fff'; ctx.font = `${24 * dpr}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText('Waiting for match…', cv.width / 2, cv.height / 2); return; }
   ctx.setTransform(sc, 0, 0, sc, offX, offY);
   ctx.save(); ctx.beginPath(); ctx.rect(0, 0, 960, 640); ctx.clip();
@@ -390,7 +390,7 @@ function draw(snap, age, now) {
     if (p.sl > 0) { ctx.strokeStyle = `rgba(255,255,255,${p.sl})`; ctx.lineWidth = 6; ctx.beginPath(); ctx.arc(x, y, 38, aimAngle - 1.3 + (1 - p.sl) * 0.8, aimAngle + 1.3 - p.sl * 0.2 * 0); ctx.stroke(); }
     if (p.bm) { ctx.fillStyle = '#ff6b6b'; ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('?!', x, y - 32); }
     if (!p.dc) {
-      ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'center'; ctx.lineWidth = 3; ctx.strokeStyle = '#000'; ctx.fillStyle = p.id === myId ? '#ffe36b' : '#fff';
+      ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'center'; ctx.lineWidth = 3; ctx.strokeStyle = '#120b1c'; ctx.fillStyle = p.id === myId ? '#ffc83b' : '#fff';
       const nm = names[p.id] || ''; ctx.strokeText(nm, x, y - 28); ctx.fillText(nm, x, y - 28);
     }
     ctx.restore();
@@ -428,14 +428,14 @@ function drawHUD(snap, me, now) {
   real.forEach((p, i) => {
     const y = 22 + i * 22; ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(6, y - 15, 170, 20);
     ctx.fillStyle = V[p.v] ? V[p.v].body : '#fff'; ctx.beginPath(); ctx.arc(18, y - 5, 7, 0, 7); ctx.fill(); ctx.strokeStyle = '#000'; ctx.lineWidth = 2; ctx.stroke();
-    ctx.fillStyle = p.al ? '#fff' : '#ff9c8f'; ctx.fillText((p.al ? '' : '✖ ') + (names[p.id] || '').slice(0, 12), 30, y); ctx.textAlign = 'right'; ctx.fillStyle = '#ffe36b'; ctx.fillText(String(snap.sc[p.id] || 0), 170, y); ctx.textAlign = 'left';
+    ctx.fillStyle = p.al ? '#fff' : '#ff9c8f'; ctx.fillText((p.al ? '' : '✖ ') + (names[p.id] || '').slice(0, 12), 30, y); ctx.textAlign = 'right'; ctx.fillStyle = '#ffc83b'; ctx.fillText(String(snap.sc[p.id] || 0), 170, y); ctx.textAlign = 'left';
   });
   ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.font = '12px sans-serif'; ctx.fillText(`Round ${snap.rd} · ${(A.list[snap.ar] || {}).name || ''}`, 10, 22 + real.length * 22 + 6);
 
   if (me) {
     const pus = me.pu || []; ctx.textAlign = 'center'; ctx.font = 'bold 13px sans-serif';
     let x = 480 - pus.length * 75;
-    for (const id of pus) { const info = G.PU_INFO ? G.PU_INFO[id] : null; ctx.fillStyle = 'rgba(20,60,110,0.85)'; ctx.fillRect(x, 606, 146, 24); ctx.strokeStyle = '#7fd0ff'; ctx.lineWidth = 2; ctx.strokeRect(x, 606, 146, 24); ctx.fillStyle = '#fff'; ctx.fillText(info ? info.n : id, x + 73, 623, 138); x += 150; }
+    for (const id of pus) { const info = G.PU_INFO ? G.PU_INFO[id] : null; ctx.fillStyle = 'rgba(45,31,61,0.9)'; ctx.fillRect(x, 606, 146, 24); ctx.strokeStyle = '#ffc83b'; ctx.lineWidth = 2; ctx.strokeRect(x, 606, 146, 24); ctx.fillStyle = '#fff'; ctx.fillText(info ? info.n : id, x + 73, 623, 138); x += 150; }
     if (me.al) { ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(430, 592, 100, 8); ctx.fillStyle = me.cd > 0 ? '#8aa' : '#7fe08a'; ctx.fillRect(430, 592, 100 * (1 - me.cd / 1.0), 8); }
     if (me.oo > 0) { ctx.fillStyle = '#ff5a4a'; ctx.font = 'bold 22px sans-serif'; ctx.fillText('RETURN TO THE ARENA!', 480, 60); }
     if (me.bm) { ctx.fillStyle = '#ff9c8f'; ctx.font = 'bold 22px sans-serif'; ctx.fillText('BAMBOOZLED!', 480, 90); }
@@ -448,13 +448,13 @@ function drawHUD(snap, me, now) {
   for (const a of announcements) {
     const alpha = Math.min(1, (a.life - (now - a.t0)) / 500);
     ctx.save(); ctx.globalAlpha = alpha; ctx.font = 'bold 18px sans-serif'; ctx.textAlign = 'center';
-    ctx.lineWidth = 4; ctx.strokeStyle = '#0c2027'; ctx.fillStyle = '#ffe36b';
+    ctx.lineWidth = 4; ctx.strokeStyle = '#120b1c'; ctx.fillStyle = '#ffc83b';
     ctx.strokeText(a.txt, 480, annY); ctx.fillText(a.txt, 480, annY);
     ctx.restore(); annY += 28;
   }
 
   ctx.textAlign = 'center';
-  const big = (txt, y, col) => { ctx.font = 'bold 64px sans-serif'; ctx.lineWidth = 8; ctx.strokeStyle = '#0c2027'; ctx.fillStyle = col || '#ffe36b'; ctx.strokeText(txt, 480, y); ctx.fillText(txt, 480, y); };
+  const big = (txt, y, col) => { ctx.font = 'bold 64px sans-serif'; ctx.lineWidth = 8; ctx.strokeStyle = '#120b1c'; ctx.fillStyle = col || '#ffc83b'; ctx.strokeText(txt, 480, y); ctx.fillText(txt, 480, y); };
   if (snap.ph === 'countdown') { big(String(Math.ceil(snap.tm)), 330); ctx.font = 'bold 20px sans-serif'; ctx.fillStyle = '#fff'; ctx.fillText(`Round ${snap.rd}`, 480, 270); }
   else if (snap.ph === 'over') big(snap.w ? `${names[snap.w] || '?'} wins the round!` : 'Draw!', 330);
   else if (snap.ph === 'end') { big(`${names[snap.ch] || '?'} wins the match!`, 320, '#7fe08a'); ctx.font = 'bold 20px sans-serif'; ctx.fillStyle = '#fff'; ctx.fillText('Returning to ' + (mode === 'mp' ? 'lobby' : 'menu') + '…', 480, 370); }
