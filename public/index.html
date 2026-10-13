@@ -161,6 +161,8 @@
   #plist div { display: flex; align-items: center; gap: 12px; padding: 6px 10px; font-size: 18px; background: var(--panel-dark); border-radius: 12px; margin-bottom: 6px; border: 2px solid #432a5e; }
   #plist img { width: 34px; height: 30px; }
   
+  input, textarea { user-select: text; -webkit-user-select: text; }
+  .code { cursor: pointer; user-select: all; -webkit-user-select: all; }
   .code { 
     font-size: 48px; 
     letter-spacing: 10px; 
@@ -227,7 +229,7 @@
     <div class="row"><button id="btnSP">Single Player</button></div>
     <div class="row"><button id="btnCreate" class="sec">Create Online Room</button></div>
     <div class="row">
-      <input id="joinCode" type="text" maxlength="4" placeholder="ROOM CODE" style="text-transform:uppercase;flex:1.2">
+      <input id="joinCode" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="ROOM CODE" style="text-transform:uppercase;flex:1.2">
       <button id="btnJoin" class="sec">Join Room</button>
     </div>
     <div class="err" id="menuErr"></div>
@@ -246,7 +248,8 @@
 
   <div id="lobby" class="panel hidden">
     <h2>Room Lobby</h2>
-    <div class="code" id="lobCode">----</div>
+    <div class="code" id="lobCode" title="Click to copy">----</div>
+    <div class="row" style="margin-top:0"><button id="btnCopy" class="sec" type="button">Copy room code</button></div>
     <p class="sub">Share this code with friends (up to 6 players).</p>
     <div id="plist"></div>
     <div id="lobVariants" style="margin-top:10px">
@@ -262,4 +265,4 @@
 <script src="/shared/game.js"></script>
 <script src="/client.js"></script>
 </body>
-</html>
+</html>

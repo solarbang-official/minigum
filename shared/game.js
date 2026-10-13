@@ -9,6 +9,8 @@ const rnd = v => Math.round(v * 10) / 10;
 const R_P = 14, SPEED = 200, DASH_SP = 560, DASH_T = 0.18, DASH_CD = 1.0;
 const B_OUT = 0.6, B_RET = 620, B_R = 7, TK_R = 260, EXPL_R = 80;
 const SLASH_T = 0.22;
+const DT = 1 / 60;                          // fixed simulation step: server, offline single-player and client prediction all use it
+const BOUNCE_MAX = 3, BOUNCE_SPEED = 0.5;   // a boomerang can bounce off walls 3 times, losing half its speed each time, then stops at the next wall
 
 const B_SPEEDS = { slow: 380, normal: 520, fast: 700, insane: 900 };
 
@@ -51,6 +53,7 @@ function sanitizeSettings(s) {
   o.books = ['off', 'slow', 'normal', 'fast'].includes(s.books) ? s.books : 'normal';
   o.boomSpeed = ['slow', 'normal', 'fast', 'insane'].includes(s.boomSpeed) ? s.boomSpeed : 'normal';
   o.underdog = !!s.underdog;
+  o.bounce = s.bounce === undefined ? true : !!s.bounce;   // boomerangs bounce off walls by default
   const ai = parseInt(s.ai); o.ai = Number.isNaN(ai) ? 1 : clamp(ai, 0, 2);
   const b = parseInt(s.bots); o.bots = Number.isNaN(b) ? 0 : clamp(b, 0, 5);
   if (Array.isArray(s.pus)) {
@@ -75,7 +78,47 @@ function fillBots(humans, n) {
   return infos;
 }
 
-function newB(p) { return { o: p, x: p.x, y: p.y, vx: 0, vy: 0, s: 'held', t: 0, fuse: -1, temp: false, td: 0, ctl: false, dfl: null, dflT: 0 }; }
+function newB(p) { return { o: p, x: p.x, y: p.y, vx: 0, vy: 0, s: 'held', t: 0, fuse: -1, temp: false, td: 0, ctl: false, dfl: null, dflT: 0, bn: 0, sp: 1 }; }
+
+// ---- shared movement helpers (the server and the client's prediction must agree exactly) ----
+function wallHitA(arena, x, y, r) { for (const q of arena.walls) if (A.circleRect(x, y, r, q)) return true; return false; }
+function pushOutOf(arena, o) {
+  for (let d = 4; d < 260; d += 6) for (let j = 0; j < 12; j++) {
+    const x = o.x + Math.cos(j * Math.PI / 6) * d, y = o.y + Math.sin(j * Math.PI / 6) * d;
+    if (A.freeAt(arena, x, y, R_P)) { o.x = x; o.y = y; return; }
+  }
+}
+function moveCircle(arena, o, dx, dy, ghost) {
+  if (ghost) { o.x += dx; o.y += dy; }
+  else {
+    const nx = o.x + dx; if (!wallHitA(arena, nx, o.y, R_P - 1)) o.x = nx;
+    const ny = o.y + dy; if (!wallHitA(arena, o.x, ny, R_P - 1)) o.y = ny;
+  }
+  o.x = clamp(o.x, 4, W - 4); o.y = clamp(o.y, 4, H - 4);
+}
+// Client-side prediction of the local player's walking and dashing for one command.
+// Mirrors Round.stepPlayer; state s = { x, y, dashT, ddx, ddy, dashCd, frozen, tk, bam, ice, caff, dwall, tpOut }.
+function predictStep(arena, s, c, dt) {
+  s.dashCd = Math.max(0, s.dashCd - dt);
+  let mx = clamp(c.mx, -1, 1), my = clamp(c.my, -1, 1); const ml = Math.hypot(mx, my);
+  if (ml > 1) { mx /= ml; my /= ml; }
+  if (s.bam) { mx = -mx; my = -my; }
+  let dashing = s.dashT > 0, vx = 0, vy = 0;
+  if (!s.frozen) {
+    if (c.d && !s.tk && s.dashCd <= 0 && !dashing && !s.tpOut) {
+      let dx = mx, dy = my; const l = Math.hypot(dx, dy);
+      if (l < 0.1) { dx = Math.cos(c.aim); dy = Math.sin(c.aim); } else { dx /= l; dy /= l; }
+      s.ddx = dx; s.ddy = dy; s.dashT = DASH_T; s.dashCd = DASH_CD;
+    }
+    dashing = s.dashT > 0;
+    const sp = SPEED * (s.caff ? 1.45 : 1) * (s.ice ? 0.5 : 1);
+    if (dashing) { vx = s.ddx * DASH_SP; vy = s.ddy * DASH_SP; s.dashT -= dt; }
+    else if (!s.tk) { vx = mx * sp; vy = my * sp; }
+  }
+  moveCircle(arena, s, vx * dt, vy * dt, dashing && s.dwall);
+  if (!(s.dashT > 0) && wallHitA(arena, s.x, s.y, R_P - 3)) pushOutOf(arena, s);
+  return s;
+}
 
 class Round {
   constructor(idx, infos, scores, set, savedPUs) {
@@ -93,7 +136,7 @@ class Round {
       const p = { id: inf.id, idx: i, name: inf.name, bot: !!inf.bot, variant: inf.variant, x: sp[0], y: sp[1], vx: 0, vy: 0,
         aim: Math.atan2(320 - sp[1], 480 - sp[0]), alive: true, pu: carryPUs, boom: [], invuln: 0, dashT: 0, dashCd: 0, ddx: 0, ddy: 0,
         slash: 0, slashCd: 0, burn: 0, burner: null, iceT: 0, frozen: false, fz: 0, iceImm: 0, onIce: false, bam: 0, still: 0, disg: -1,
-        oob: 0, tk: false, tkx: 0, tky: 0, cause: null, ai: null,
+        oob: 0, tk: false, tkx: 0, tky: 0, cause: null, ai: null, idle: 0,
         input: { mx: 0, my: 0, aim: 0, dh: false, t: false, m: false, d: false, r: false } };
       p.input.aim = p.aim;
       p.boom.push(newB(p));
@@ -114,7 +157,7 @@ class Round {
   ev(...a) { this.events.push(a); }
   has(p, id) { return p.pu.includes(id); }
 
-  wallHit(x, y, r) { for (const q of this.arena.walls) if (A.circleRect(x, y, r, q)) return true; return false; }
+  wallHit(x, y, r) { return wallHitA(this.arena, x, y, r); }
   deadly(x, y) {
     for (const q of this.arena.water) if (x >= q.x && x <= q.x + q.w && y >= q.y && y <= q.y + q.h) return true;
     for (const q of this.arena.holes) if (x >= q.x && x <= q.x + q.w && y >= q.y && y <= q.y + q.h) return true;
@@ -127,12 +170,7 @@ class Round {
   }
   wetAt(x, y) { for (const q of this.arena.wet) if (x >= q.x && x <= q.x + q.w && y >= q.y && y <= q.y + q.h) return true; return false; }
   inBounds(x, y, m = 0) { const b = this.bounds; return x >= b.x + m && x <= b.x + b.w - m && y >= b.y + m && y <= b.y + b.h - m; }
-  pushOut(o) {
-    for (let d = 4; d < 260; d += 6) for (let j = 0; j < 12; j++) {
-      const x = o.x + Math.cos(j * Math.PI / 6) * d, y = o.y + Math.sin(j * Math.PI / 6) * d;
-      if (A.freeAt(this.arena, x, y, R_P)) { o.x = x; o.y = y; return; }
-    }
-  }
+  pushOut(o) { pushOutOf(this.arena, o); }
   blocked(x1, y1, x2, y2) {
     const d = Math.hypot(x2 - x1, y2 - y1), n = Math.ceil(d / 14);
     for (let i = 1; i < n; i++) { const t = i / n; if (this.wallHit(x1 + (x2 - x1) * t, y1 + (y2 - y1) * t, 3)) return true; }
@@ -155,7 +193,7 @@ class Round {
     if (by && by !== p && cause !== 'drop' && cause !== 'oob' && !this.over && this.set.mode === 'kill') this.scores[by.id] = (this.scores[by.id] || 0) + 1;
   }
   launch(p, b, ang) {
-    b.s = 'fly'; b.t = 0; b.td = 0; b.x = p.x + Math.cos(ang) * 20; b.y = p.y + Math.sin(ang) * 20;
+    b.s = 'fly'; b.t = 0; b.td = 0; b.bn = 0; b.sp = 1; b.x = p.x + Math.cos(ang) * 20; b.y = p.y + Math.sin(ang) * 20;
     if (this.wallHit(b.x, b.y, B_R)) { b.x = p.x; b.y = p.y; }
     b.vx = Math.cos(ang) * this.bSpeed; b.vy = Math.sin(ang) * this.bSpeed;
   }
@@ -206,7 +244,7 @@ class Round {
     this.catchB(p, b); b.fuse = -1;
   }
   deflect(b, d) {
-    b.s = 'fly'; b.dfl = d; b.dflT = 0.35; b.t = B_OUT * 0.35; b.ctl = false;
+    b.s = 'fly'; b.dfl = d; b.dflT = 0.35; b.t = B_OUT * 0.35; b.ctl = false; b.bn = 0; b.sp = 1;
     b.vx = Math.cos(d.aim) * this.bSpeed * 1.15; b.vy = Math.sin(d.aim) * this.bSpeed * 1.15;
     b.x = d.x + Math.cos(d.aim) * 40; b.y = d.y + Math.sin(d.aim) * 40;
     this.ev('defl', b.x, b.y);
@@ -261,14 +299,7 @@ class Round {
     }
   }
 
-  moveP(o, dx, dy, ghost) {
-    if (ghost) { o.x += dx; o.y += dy; }
-    else {
-      const nx = o.x + dx; if (!this.wallHit(nx, o.y, R_P - 1)) o.x = nx;
-      const ny = o.y + dy; if (!this.wallHit(o.x, ny, R_P - 1)) o.y = ny;
-    }
-    o.x = clamp(o.x, 4, W - 4); o.y = clamp(o.y, 4, H - 4);
-  }
+  moveP(o, dx, dy, ghost) { moveCircle(this.arena, o, dx, dy, ghost); }
 
   stepPlayer(p, dt) {
     const inp = p.input;
@@ -376,17 +407,36 @@ class Round {
             let d = Math.atan2(p.tky, p.tkx) - ang; d = Math.atan2(Math.sin(d), Math.cos(d));
             ang += clamp(d, -7 * dt, 7 * dt);
           }
-          b.vx = Math.cos(ang) * this.bSpeed * 0.8; b.vy = Math.sin(ang) * this.bSpeed * 0.8; b.ctl = true;
+          b.vx = Math.cos(ang) * this.bSpeed * 0.8 * b.sp; b.vy = Math.sin(ang) * this.bSpeed * 0.8 * b.sp; b.ctl = true;
         } else b.ctl = false;
         if (b.s === 'fly') {
-          if (!b.ctl) b.t += dt;
-          const nx = b.x + b.vx * dt, ny = b.y + b.vy * dt;
-          if (this.wallHit(nx, ny, B_R) || nx < 0 || ny < 0 || nx > W || ny > H) {
-            b.s = 'drop'; b.vx = b.vy = 0; b.dfl = null; this.ev('thud', b.x, b.y);
+          // The outbound range is counted at full speed, so a slowed (bounced) boomerang still covers the
+          // same total distance, just more slowly. That is what lets it reach its 3 bounces and the final wall.
+          if (!b.ctl) b.t += dt * b.sp;
+          let px = b.x, py = b.y, stopped = false;
+          const n = Math.max(1, Math.ceil(Math.hypot(b.vx, b.vy) * dt / 3));   // sub-steps so it touches walls instead of stopping short
+          const sx = b.vx * dt / n, sy = b.vy * dt / n;
+          for (let i = 0; i < n; i++) {
+            const nx = px + sx, ny = py + sy;
+            const edgeX = nx < 0 || nx > W, edgeY = ny < 0 || ny > H;
+            if (!edgeX && !edgeY && !this.wallHit(nx, ny, B_R)) { px = nx; py = ny; continue; }
+            if (this.set.bounce && b.bn < BOUNCE_MAX) {
+              const hx = edgeX || this.wallHit(nx, py, B_R), hy = edgeY || this.wallHit(px, ny, B_R);
+              if (hx || !hy) b.vx = -b.vx;       // blocked sideways (or clipped a corner): reflect x
+              if (hy || !hx) b.vy = -b.vy;       // blocked vertically (or clipped a corner): reflect y
+              b.vx *= BOUNCE_SPEED; b.vy *= BOUNCE_SPEED; b.sp *= BOUNCE_SPEED; b.bn++;
+              this.ev('bnc', px, py, b.bn);
+            } else {
+              b.s = 'drop'; b.vx = b.vy = 0; b.dfl = null; stopped = true;
+              this.ev('thud', px, py);
+            }
+            break;
+          }
+          this.trail(p, b, px, py); b.x = px; b.y = py;
+          if (stopped) {
             if (this.deadly(b.x, b.y) || b.x < 2 || b.y < 2 || b.x > W - 2 || b.y > H - 2) this.catchB(p, b);
             continue;
           }
-          this.trail(p, b, nx, ny); b.x = nx; b.y = ny;
           if (b.t >= B_OUT) { b.s = 'ret'; b.dfl = null; }
         } else if (b.s === 'ret') {
           const dx = p.x - b.x, dy = p.y - b.y, d = Math.hypot(dx, dy);
@@ -530,6 +580,9 @@ class Round {
   step(dt) {
     this.time += dt;
     for (const p of this.players) if (p.bot && p.alive) this.aiThink(p, dt);
+    // A stalled client (backgrounded tab, network hiccup) must not keep running with its last held keys:
+    // after 0.25s without input the player stands still.
+    for (const p of this.players) if (p.alive && !p.bot && ++p.idle > 15) { p.input.mx = 0; p.input.my = 0; p.input.dh = false; }
     for (const p of this.players) if (p.alive) this.stepPlayer(p, dt);
     const al = this.players.filter(p => p.alive);
     for (let i = 0; i < al.length; i++) for (let j = i + 1; j < al.length; j++) {
@@ -561,10 +614,16 @@ class Round {
 
   snap() {
     const pl = [];
-    for (const p of this.players) pl.push({ id: p.id, x: rnd(p.x), y: rnd(p.y), vx: Math.round(p.vx), vy: Math.round(p.vy), a: +p.aim.toFixed(2),
-      al: p.alive ? 1 : 0, v: p.variant, sh: p.pu.includes('shield') ? 1 : 0, fr: p.frozen ? 1 : 0, bn: p.burn > 0 ? 1 : 0, ds: p.disg,
-      dh: p.dashT > 0 ? 1 : 0, sl: p.slash > 0 ? +(p.slash / SLASH_T).toFixed(2) : 0, bm: p.bam > 0 ? 1 : 0, oo: +(p.oob / 3).toFixed(2),
-      iv: p.invuln > 0 ? 1 : 0, pu: p.pu, hd: p.boom.filter(b => b.s === 'held' && !b.temp).length, tk: p.tk ? 1 : 0, cd: +p.dashCd.toFixed(2) });
+    for (const p of this.players) {
+      const e = { id: p.id, x: rnd(p.x), y: rnd(p.y), vx: Math.round(p.vx), vy: Math.round(p.vy), a: +p.aim.toFixed(2),
+        al: p.alive ? 1 : 0, v: p.variant, sh: p.pu.includes('shield') ? 1 : 0, fr: p.frozen ? 1 : 0, bn: p.burn > 0 ? 1 : 0, ds: p.disg,
+        dh: p.dashT > 0 ? 1 : 0, sl: p.slash > 0 ? +(p.slash / SLASH_T).toFixed(2) : 0, bm: p.bam > 0 ? 1 : 0, oo: +(p.oob / 3).toFixed(2),
+        iv: p.invuln > 0 ? 1 : 0, pu: p.pu, hd: p.boom.filter(b => b.s === 'held' && !b.temp).length, tk: p.tk ? 1 : 0, cd: +p.dashCd.toFixed(3) };
+      // what the owning client needs to keep predicting its own movement from this snapshot
+      if (p.onIce) e.ic = 1;
+      if (p.dashT > 0) { e.dtm = +p.dashT.toFixed(4); e.dd = [+p.ddx.toFixed(4), +p.ddy.toFixed(4)]; }
+      pl.push(e);
+    }
     for (const d of this.decoys) if (d.alive) pl.push({ id: d.id, dc: 1, x: rnd(d.x), y: rnd(d.y), vx: Math.round(d.vx), vy: Math.round(d.vy), a: +d.aim.toFixed(2), al: 1, v: d.variant, hd: 0, pu: [] });
     const bo = [];
     this.players.forEach((p, i) => { for (const b of p.boom) if (b.s !== 'held') bo.push([rnd(b.x), rnd(b.y), b.s === 'fly' ? 0 : b.s === 'ret' ? 1 : 2, i, Math.round(b.vx), Math.round(b.vy), b.temp ? 1 : 0, b.fuse > 0 ? 1 : 0]); });
@@ -579,6 +638,7 @@ class Match {
     this.set = sanitizeSettings(settings); this.infos = infos;
     this.scores = {}; for (const i of infos) this.scores[i.id] = 0;
     this.playerPUs = {}; for (const i of infos) this.playerPUs[i.id] = [];
+    this.seqs = {};   // last input sequence number received from each human (echoed in snapshots for client prediction)
     this.round = 0; this.lastArena = -1; this.finished = false; this.winnerId = null; this.champId = null;
     this.startRound();
   }
@@ -596,6 +656,8 @@ class Match {
     i.mx = clamp(+inp.mx || 0, -1, 1); i.my = clamp(+inp.my || 0, -1, 1);
     i.aim = Number.isFinite(+inp.aim) ? +inp.aim : i.aim; i.dh = !!inp.dh;
     if (inp.t) i.t = true; if (inp.m) i.m = true; if (inp.d) i.d = true; if (inp.r) i.r = true;
+    p.idle = 0;
+    const sq = inp.sq | 0; if (sq > (this.seqs[id] | 0)) this.seqs[id] = sq;
   }
   replaceWithBot(id) {
     const inf = this.infos.find(i => i.id === id); if (inf) inf.bot = true;
@@ -631,10 +693,11 @@ class Match {
   snapshot() {
     const s = this.game.snap();
     s.ph = this.phase; s.tm = Math.max(0, +this.t.toFixed(2)); s.rd = this.round; s.sc = this.scores; s.w = this.winnerId; s.ch = this.champId;
+    for (const e of s.pl) if (this.seqs[e.id]) e.sq = this.seqs[e.id];
     return s;
   }
 }
 
-const api = { Match, Round, VARIANTS, PU_INFO, PU_IDS, BOT_NAMES, B_SPEEDS, sanitizeSettings, fillBots };
+const api = { Match, Round, VARIANTS, PU_INFO, PU_IDS, BOT_NAMES, B_SPEEDS, DT, BOUNCE_MAX, BOUNCE_SPEED, sanitizeSettings, fillBots, predictStep };
 if (typeof module === 'object' && module.exports) module.exports = api; else root.MGGame = api;
-})(typeof self !== 'undefined' ? self : globalThis);
+})(typeof self !== 'undefined' ? self : globalThis);

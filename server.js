@@ -5,12 +5,19 @@ const { performance } = require('perf_hooks');
 const G = require('./shared/game.js');
 
 const PORT = process.env.PORT || 3000;
-const MIME = { 
-  '.html': 'text/html; charset=utf-8', 
-  '.js': 'text/javascript; charset=utf-8', 
-  '.css': 'text/css', 
-  '.svg': 'image/svg+xml', 
-  '.png': 'image/png', 
+
+// Latency vs bandwidth. The simulation always runs at a fixed 60 Hz. SNAPSHOT_HZ is how many of those ticks are sent
+// to players: 60 gives the lowest latency (about 85 KB/s per player); 30 or 20 halve/third the bandwidth.
+const TICK_MS = 1000 / 60;
+const SNAPSHOT_HZ = Math.max(10, Math.min(60, +process.env.SNAPSHOT_HZ || 60));
+const SNAP_EVERY = Math.max(1, Math.round(60 / SNAPSHOT_HZ));
+
+const MIME = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
   '.ico': 'image/x-icon',
   '.mp3': 'audio/mpeg',
   '.wav': 'audio/wav',
@@ -32,12 +39,8 @@ const server = http.createServer((req, res) => {
   });
 });
 
-const wss = new WebSocketServer({ 
-  server, 
-  maxPayload: 4096,
-  perMessageDeflate: false 
-});
-
+// perMessageDeflate off: compressing 1 KB messages costs more time than it saves
+const wss = new WebSocketServer({ server, maxPayload: 4096, perMessageDeflate: false });
 const rooms = new Map();
 let nextId = 1;
 
@@ -68,31 +71,40 @@ function startMatch(room) {
   const infos = G.fillBots(humans, nb);
   room.match = new G.Match(room.settings, infos);
   broadcast(room, { t: 'start', infos, settings: room.settings });
-  
-  room.last = performance.now(); 
+
   room.tick = 0;
-  room.timer = setInterval(() => loop(room), 1000 / 60);
+  room.next = performance.now() + TICK_MS;
+  schedule(room);
 }
 
+// Fixed-timestep loop. Every step is exactly 1/60 s, which is what lets clients predict their own movement
+// exactly. The next tick is scheduled against a running deadline rather than a fixed interval, so timer jitter
+// doesn't accumulate, and a stalled event loop catches up instead of slowing the game down.
+function schedule(room) {
+  room.timer = setTimeout(() => loop(room), Math.max(0, Math.ceil(room.next - performance.now())));
+}
 function loop(room) {
-  const now = performance.now(), dt = Math.min(0.05, (now - room.last) / 1000); 
-  room.last = now;
-  room.match.step(dt); 
-  room.tick++;
-  
-  if (room.tick % 3 === 0) broadcast(room, Object.assign({ t: 's' }, room.match.snapshot()));
-  if (room.match.finished) endMatch(room);
+  const match = room.match; if (!match) return;
+  const now = performance.now();
+  let steps = 0, due = false;
+  while (room.next <= now && steps < 5) {
+    match.step(G.DT); room.tick++; room.next += TICK_MS; steps++;
+    if (room.tick % SNAP_EVERY === 0) due = true;
+    if (match.finished) { endMatch(room); return; }
+  }
+  if (room.next < now - 100) room.next = now;   // badly behind: drop the backlog rather than spiral
+  if (due) broadcast(room, Object.assign({ t: 's' }, match.snapshot()));
+  schedule(room);
 }
-
 function endMatch(room) {
-  clearInterval(room.timer); room.match = null;
+  clearTimeout(room.timer); room.match = null;
   broadcast(room, { t: 'lobby' }); broadcast(room, roomInfo(room));
 }
 
 function leaveRoom(c) {
   const room = c.room; if (!room) return;
   c.room = null; room.clients.delete(c.id);
-  if (room.clients.size === 0) { clearInterval(room.timer); rooms.delete(room.code); return; }
+  if (room.clients.size === 0) { clearTimeout(room.timer); room.match = null; rooms.delete(room.code); return; }
   if (room.host === c.id) room.host = room.clients.keys().next().value;
   if (room.match) room.match.replaceWithBot(c.id);
   broadcast(room, roomInfo(room));
@@ -105,18 +117,23 @@ function joinRoom(c, room) {
 }
 
 wss.on('connection', ws => {
-  if (ws._socket && ws._socket.setNoDelay) {
-    ws._socket.setNoDelay(true);
-  }
+  if (ws._socket && ws._socket.setNoDelay) ws._socket.setNoDelay(true);   // no Nagle batching: send every packet immediately
 
-  const c = { id: 'p' + (nextId++), ws, name: 'Player', variant: 0, room: null, alive: true };
-  ws.on('pong', () => { c.alive = true; });
+  const c = { id: 'p' + (nextId++), ws, name: 'Player', variant: 0, room: null };
+  ws.isAlive = true;
+  ws.on('pong', () => { ws.isAlive = true; });
   send(ws, { t: 'hello', id: c.id });
 
   ws.on('message', raw => {
     let m; try { m = JSON.parse(raw); } catch (e) { return; }
     if (!m || typeof m !== 'object') return;
     switch (m.t) {
+      case 'input': {   // the hot path: checked first and kept tiny
+        const r = c.room;
+        if (r && r.match) r.match.input(c.id, { mx: m.mx, my: m.my, aim: m.aim, dh: m.dh, t: m.tt, m: m.mm, d: m.dd, r: m.rr, sq: m.sq });
+        break;
+      }
+      case 'ping': send(ws, { t: 'pong', c: +m.c || 0 }); break;   // answered immediately, outside the game loop
       case 'create': case 'join': {
         if (c.room) return;
         c.name = cleanName(m.name); c.variant = Number.isInteger(m.variant) ? m.variant : 0;
@@ -135,7 +152,6 @@ wss.on('connection', ws => {
       case 'settings': { const r = c.room; if (!r || r.host !== c.id || r.match) return; r.settings = G.sanitizeSettings(m.settings); broadcast(r, roomInfo(r)); break; }
       case 'variant': { const r = c.room; if (!r || r.match) return; const used = [...r.clients.values()].some(o => o !== c && o.variant === m.v); if (Number.isInteger(m.v) && m.v >= 0 && m.v < G.VARIANTS.length && !used) { c.variant = m.v; broadcast(r, roomInfo(r)); } break; }
       case 'start': { const r = c.room; if (!r || r.host !== c.id || r.match) return; startMatch(r); break; }
-      case 'input': { const r = c.room; if (r && r.match) r.match.input(c.id, { mx: m.mx, my: m.my, aim: m.aim, dh: m.dh, t: m.tt, m: m.mm, d: m.dd, r: m.rr }); break; }
       case 'leave': leaveRoom(c); break;
     }
   });
@@ -144,12 +160,14 @@ wss.on('connection', ws => {
   ws.on('error', () => {});
 });
 
+// Drop connections that went silent (laptop lid closed, wifi lost) so they don't linger as ghost players.
 const heartbeat = setInterval(() => {
   for (const ws of wss.clients) {
+    if (ws.isAlive === false) { ws.terminate(); continue; }
+    ws.isAlive = false;
     if (ws.readyState === 1) ws.ping();
   }
 }, 20000);
-
 wss.on('close', () => clearInterval(heartbeat));
 
-server.listen(PORT, () => console.log('MiniGums running on port ' + PORT));
+server.listen(PORT, () => console.log('MiniGums running on port ' + PORT + ' (simulation 60 Hz, snapshots ' + (60 / SNAP_EVERY) + ' Hz)'));

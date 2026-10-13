@@ -10,7 +10,7 @@ const fishImgs = V.map((v, i) => { const im = new Image(); im.src = fishSrc(i); 
 
 // ---------- state ----------
 let myName = localStorage.mgName || '', myVar = +localStorage.mgVar || 0;
-let spSettings = Object.assign({ arena: 'random', mode: 'last', target: 5, books: 'normal', boomSpeed: 'normal', underdog: false, ai: 1, bots: 3, pus: G.PU_IDS ? G.PU_IDS.slice() : [] }, safeParse(localStorage.mgSP));
+let spSettings = Object.assign({ arena: 'random', mode: 'last', target: 5, books: 'normal', boomSpeed: 'normal', bounce: true, underdog: false, ai: 1, bots: 3, pus: G.PU_IDS ? G.PU_IDS.slice() : [] }, safeParse(localStorage.mgSP));
 function safeParse(s) { try { return JSON.parse(s) || {}; } catch (e) { return {}; } }
 let mode = 'menu';
 let ws = null, myId = null, room = null;
@@ -86,6 +86,7 @@ function formHTML(botsLabel, botsMin) {
   <label class="field-label">Points to win <input data-k="target" type="number" min="1" max="25"></label>
   <label class="field-label">Blue book spawn <select data-k="books"><option value="off">Off</option><option value="slow">Slow</option><option value="normal">Normal</option><option value="fast">Fast</option></select></label>
   <label class="field-label">Boomerang Speed <select data-k="boomSpeed"><option value="slow">Slow</option><option value="normal">Normal</option><option value="fast">Fast</option><option value="insane">Insane</option></select></label>
+  <label class="field-label">Boomerangs bounce off walls <input data-k="bounce" type="checkbox"></label>
   <label class="field-label">Losers start with shield <input data-k="underdog" type="checkbox"></label>
   <label class="field-label">AI skill <select data-k="ai"><option value="0">Easy</option><option value="1">Normal</option><option value="2">Hard</option></select></label>
   <label class="field-label">${botsLabel} <input data-k="bots" type="number" min="${botsMin}" max="5"></label>
@@ -133,6 +134,7 @@ function startGame(m, inf, set, mt) {
   mode = m; infos = inf; names = {}; varOf = {}; announcements = [];
   for (const i of inf) { names[i.id] = i.name; varOf[i.id] = i.variant; }
   match = mt; lastSnap = null; myId = m === 'sp' ? 'me' : myId; show(null); if ($('#leave')) $('#leave').classList.remove('hidden'); hintT = performance.now();
+  netReset(); if (m === 'mp') wsSend({ t: 'ping', c: performance.now() });
   ensureAudio();
   playBGM();
 }
@@ -159,7 +161,8 @@ function connect(then) {
     else if (m.t === 'err') { if ($('#menuErr')) $('#menuErr').textContent = m.m; }
     else if (m.t === 'room') { room = m; if (mode !== 'mp') { mode = 'lobby'; show('lobby'); } renderLobby(); }
     else if (m.t === 'start') { startGame('mp', m.infos, m.settings, null); }
-    else if (m.t === 's') { lastSnap = m; lastSnapAt = performance.now(); playEvents(m.ev); }
+    else if (m.t === 's') { lastSnap = m; lastSnapAt = performance.now(); reconcile(m); playEvents(m.ev); }
+    else if (m.t === 'pong') { onPong(m.c); }
     else if (m.t === 'lobby') { mode = 'lobby'; match = null; lastSnap = null; if ($('#leave')) $('#leave').classList.add('hidden'); show('lobby'); }
   };
 }
@@ -168,6 +171,36 @@ if ($('#btnCreate')) $('#btnCreate').onclick = () => connect(() => wsSend({ t: '
 if ($('#btnJoin')) $('#btnJoin').onclick = () => { const c = $('#joinCode') ? $('#joinCode').value.trim() : ''; if (c.length < 4) { if ($('#menuErr')) $('#menuErr').textContent = 'Enter the 4-letter room code'; return; } connect(() => wsSend({ t: 'join', code: c, name: myName || 'Player', variant: myVar })); };
 if ($('#lobLeave')) $('#lobLeave').onclick = () => { wsSend({ t: 'leave' }); toMenu(); };
 if ($('#lobStart')) $('#lobStart').onclick = () => wsSend({ t: 'start' });
+// ---------- copy room code ----------
+function legacyCopy(text) {
+  try {
+    const ta = document.createElement('textarea'); ta.value = text; ta.setAttribute('readonly', '');
+    ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;pointer-events:none';
+    document.body.appendChild(ta); ta.select(); ta.setSelectionRange(0, text.length);
+    const ok = document.execCommand('copy'); ta.remove(); return ok;
+  } catch (e) { return false; }
+}
+function copyText(text) {
+  if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(text).then(() => true, () => legacyCopy(text));
+  return Promise.resolve(legacyCopy(text));   // plain-http hosting has no navigator.clipboard
+}
+let copyTimer = 0;
+function copyRoomCode() {
+  if (!room || !room.code) return;
+  copyText(room.code).then(ok => {
+    const btn = $('#btnCopy'); if (!btn) return;
+    if (!ok) { const el = $('#lobCode'); if (el && window.getSelection) { const r = document.createRange(); r.selectNodeContents(el); const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r); } }
+    btn.textContent = ok ? 'Copied!' : 'Press Ctrl+C to copy';
+    clearTimeout(copyTimer); copyTimer = setTimeout(() => { btn.textContent = 'Copy room code'; }, 1800);
+  });
+}
+if ($('#btnCopy')) $('#btnCopy').onclick = copyRoomCode;
+if ($('#lobCode')) $('#lobCode').onclick = copyRoomCode;
+if ($('#joinCode')) {
+  $('#joinCode').addEventListener('input', e => { e.target.value = e.target.value.replace(/[^a-zA-Z]/g, '').toUpperCase().slice(0, 4); });   // paste "abcd " or " ABCD" and it still works
+  $('#joinCode').addEventListener('keydown', e => { if (e.key === 'Enter' && $('#btnJoin')) $('#btnJoin').click(); });
+}
+
 if ($('#lobForm')) $('#lobForm').addEventListener('change', () => { if (room && room.hostId === myId) wsSend({ t: 'settings', settings: readForm($('#lobForm')) }); });
 
 function renderLobby() {
@@ -205,18 +238,18 @@ addEventListener('keydown', e => {
   const k = KEYMAP[e.key]; if (k) { keys[k] = true; e.preventDefault(); }
   if (e.repeat) return;
   if (e.key === ' ' || e.key === 'Shift') { latch.d = true; keys.dash = true; e.preventDefault(); }
-  else if (e.key === 'j' || e.key === 'J') latch.t = true;
-  else if (e.key === 'k' || e.key === 'K') latch.m = true;
-  else if (e.key === 'e' || e.key === 'E' || e.key === 'r' || e.key === 'R') latch.r = true;
+  else if (e.key === 'j' || e.key === 'J') { latch.t = true; netAct('t'); }
+  else if (e.key === 'k' || e.key === 'K') { latch.m = true; netAct('m'); }
+  else if (e.key === 'e' || e.key === 'E' || e.key === 'r' || e.key === 'R') { latch.r = true; netAct('r'); }
   ensureAudio(); playBGM();
 });
 addEventListener('keyup', e => { const k = KEYMAP[e.key]; if (k) keys[k] = false; if (e.key === ' ' || e.key === 'Shift') keys.dash = false; });
 if (cv) {
-  cv.addEventListener('mousemove', e => { mouseX = (e.clientX * dpr - offX) / sc; mouseY = (e.clientY * dpr - offY) / sc; haveMouse = true; });
+  addEventListener('mousemove', e => { mouseX = (e.clientX * dpr - offX) / sc; mouseY = (e.clientY * dpr - offY) / sc; haveMouse = true; });
   cv.addEventListener('mousedown', e => {
     if (mode !== 'sp' && mode !== 'mp') return;
     if (e.button === 0) { lmbHeld = true; recallHold = !canThrow(lastSnap); }
-    else if (e.button === 2) latch.m = true;
+    else if (e.button === 2) { latch.m = true; netAct('m'); }
     ensureAudio(); playBGM(); e.preventDefault();
   });
   cv.addEventListener('contextmenu', e => e.preventDefault());
@@ -228,16 +261,82 @@ function canThrow(snap) {
   const out = snap.bo.some(o => o[3] === idx);
   return me.hd > 0 && !(me.pu.includes('multi') && out);
 }
-addEventListener('mouseup', e => { if (e.button === 0 && lmbHeld) { lmbHeld = false; if (!recallHold && (mode === 'sp' || mode === 'mp')) latch.t = true; recallHold = false; } });
+addEventListener('mouseup', e => { if (e.button === 0 && lmbHeld) { lmbHeld = false; if (!recallHold && (mode === 'sp' || mode === 'mp')) { latch.t = true; netAct('t'); } recallHold = false; } });
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; lmbHeld = false; recallHold = false; });
 
 let lastAim = 0;
 function buildInput(snap) {
   const me = snap && snap.pl.find(p => p.id === myId);
-  if (me && haveMouse) { const px = me.x, py = me.y; lastAim = Math.atan2(mouseY - py, mouseX - px); }
+  if (me && haveMouse) { const dp = myDisp(me), px = dp[0], py = dp[1]; lastAim = Math.atan2(mouseY - py, mouseX - px); }
   const mx = (keys.r ? 1 : 0) - (keys.l ? 1 : 0), my = (keys.d ? 1 : 0) - (keys.u ? 1 : 0);
   return { mx, my, aim: lastAim, dh: !!keys.dash, tt: latch.t, mm: latch.m, dd: latch.d, rr: latch.r || (lmbHeld && recallHold) };
 }
+
+// ---------- multiplayer: input stream, prediction, reconciliation ----------
+// Every 1/60 s the client sends one numbered input command and applies it to its own fish at once, using the same
+// movement code as the server. Each snapshot says which command the server has seen (sq); the client re-bases on
+// the server's position and replays the commands that are still in flight. Your own movement therefore responds
+// instantly whatever your ping is, and is corrected smoothly if the server disagrees (ice, knockback, dash timing).
+// Other players and boomerangs are shown as the server last reported them.
+const NET = { seq: 0, pending: [], pred: null, err: { x: 0, y: 0 }, rd: -1, rtt: 0, last: { mx: 0, my: 0, dh: false },
+  thrownAt: -1e9, hdAtThrow: 0, slashAt: -1e9, thSnd: -1e9, slSnd: -1e9, corr: { n: 0, max: 0 } };
+function netReset() { NET.pending = []; NET.pred = null; NET.err.x = NET.err.y = 0; NET.rd = -1; NET.rtt = 0; NET.thrownAt = NET.slashAt = NET.thSnd = NET.slSnd = -1e9; netAcc = 0; }
+const mySnap = snap => snap && snap.pl.find(p => p.id === myId);
+function myDisp(me) { return (mode === 'mp' && NET.pred) ? [NET.pred.x + NET.err.x, NET.pred.y + NET.err.y] : [me.x, me.y]; }
+function shownHeld(p, now) {
+  if (mode === 'mp' && p.id === myId && now - NET.thrownAt < 250 && p.hd >= NET.hdAtThrow) return Math.max(0, p.hd - 1);
+  return p.hd;
+}
+function shownSlash(p, now) {
+  let v = p.sl;
+  if (mode === 'mp' && p.id === myId) { const t = (now - NET.slashAt) / 220; if (t >= 0 && t < 1) v = Math.max(v, 1 - t); }
+  return v;
+}
+function predictable(snap, me) { return !!me && !!me.al && (snap.ph === 'playing' || snap.ph === 'over'); }
+function stateFromSnap(snap, me) {
+  const idx = snap.pl.filter(p => !p.dc).findIndex(p => p.id === myId);
+  const tpOut = me.pu.includes('teleport') && snap.bo.some(o => o[3] === idx && !o[6]);   // dash would teleport instead of dash
+  return { x: me.x, y: me.y, dashT: me.dtm || 0, ddx: me.dd ? me.dd[0] : 0, ddy: me.dd ? me.dd[1] : 0, dashCd: me.cd || 0,
+    frozen: !!me.fr, tk: !!me.tk, bam: !!me.bm, ice: !!me.ic, caff: me.pu.includes('caffeinated'), dwall: me.pu.includes('dashwall'), tpOut };
+}
+function reconcile(snap) {
+  const me = mySnap(snap); if (!me || mode !== 'mp') return;
+  if (snap.rd !== NET.rd) { NET.rd = snap.rd; NET.err.x = NET.err.y = 0; NET.pred = null; }
+  const ack = me.sq || 0;
+  while (NET.pending.length && NET.pending[0].sq <= ack) NET.pending.shift();
+  if (!predictable(snap, me)) { NET.pred = null; return; }
+  const arena = A.list[snap.ar]; if (!arena) return;
+  const st = stateFromSnap(snap, me);
+  for (const c of NET.pending) G.predictStep(arena, st, c, G.DT);
+  if (NET.pred) {
+    const jx = NET.pred.x - st.x, jy = NET.pred.y - st.y, j = Math.hypot(jx, jy);
+    NET.corr.n++; if (j > NET.corr.max) NET.corr.max = j;
+    NET.err.x += jx; NET.err.y += jy;                       // keep the picture continuous: fold the jump into a fading offset
+    if (Math.hypot(NET.err.x, NET.err.y) > 90) NET.err.x = NET.err.y = 0;   // teleport / knockback: just snap
+  }
+  NET.pred = st;
+}
+function mpTick() {
+  if (!ws || ws.readyState !== 1) return;
+  const i = buildInput(lastSnap);
+  const c = { sq: ++NET.seq, mx: i.mx, my: i.my, aim: +i.aim.toFixed(3), dh: i.dh, d: i.dd };
+  wsSend({ t: 'input', sq: c.sq, mx: c.mx, my: c.my, aim: c.aim, dh: c.dh, tt: i.tt, mm: i.mm, dd: i.dd, rr: i.rr });
+  latch.t = latch.m = latch.d = latch.r = false;
+  NET.last.mx = c.mx; NET.last.my = c.my; NET.last.dh = c.dh;
+  NET.pending.push(c); if (NET.pending.length > 180) NET.pending.shift();
+  if (NET.pred && lastSnap) G.predictStep(A.list[lastSnap.ar], NET.pred, { sq: c.sq, mx: c.mx, my: c.my, aim: c.aim, d: c.d }, G.DT);
+}
+// Throw / slash / recall don't wait for the next 1/60 s tick: send right away, and show the result locally at once.
+function netAct(kind) {
+  if (mode !== 'mp' || !ws || ws.readyState !== 1) return;
+  const me = mySnap(lastSnap), now = performance.now();
+  if (kind === 't' && me && me.al && canThrow(lastSnap)) { NET.thrownAt = now; NET.hdAtThrow = me.hd; NET.thSnd = now; beep(380, 0.1, 'triangle', 0.04, 200); }
+  if (kind === 'm' && me && me.al && me.hd > 0 && now - NET.slashAt > 450) { NET.slashAt = now; NET.slSnd = now; beep(250, 0.08, 'square', 0.04, -100); }
+  const i = buildInput(lastSnap);
+  wsSend({ t: 'input', sq: NET.seq, mx: NET.last.mx, my: NET.last.my, aim: +i.aim.toFixed(3), dh: NET.last.dh, tt: latch.t, mm: latch.m, dd: false, rr: latch.r });
+  latch.t = latch.m = latch.r = false;
+}
+function onPong(c) { const rtt = performance.now() - c; if (rtt >= 0 && rtt < 5000) NET.rtt = NET.rtt ? NET.rtt * 0.7 + rtt * 0.3 : rtt; }
 
 // ---------- audio ----------
 let actx = null;
@@ -274,9 +373,10 @@ function playEvents(evs) {
       case 'pk': fx.push({ k, x, y, t0: now, life: 500 }); beep(700, 0.12, 'sine', 0.06, 500); break;
       case 'pu_ann': addAnnouncement(e[2] || names[e[1]] || 'Player', e[3], e[4]); beep(850, 0.25, 'sine', 0.08, 300); break;
       case 'tp': fx.push({ k, x, y, t0: now, life: 300 }, { k, x: e[3], y: e[4], t0: now, life: 300 }); beep(900, 0.2, 'sine', 0.05, -500); break;
-      case 'th': beep(380, 0.1, 'triangle', 0.04, 200); break;
-      case 'sl': fx.push({ k, x, y, t0: now, life: 200 }); beep(250, 0.08, 'square', 0.04, -100); break;
+      case 'th': if (now - NET.thSnd < 600) { NET.thSnd = -1e9; break; } beep(380, 0.1, 'triangle', 0.04, 200); break;
+      case 'sl': fx.push({ k, x, y, t0: now, life: 200 }); if (now - NET.slSnd < 600) { NET.slSnd = -1e9; break; } beep(250, 0.08, 'square', 0.04, -100); break;
       case 'defl': fx.push({ k: 'hit', x, y, t0: now, life: 300 }); beep(1200, 0.12, 'square', 0.06, -500); break;
+      case 'bnc': fx.push({ k, x, y, t0: now, life: 260 }); beep(Math.max(180, 720 - (e[3] || 1) * 170), 0.07, 'square', 0.05, -120); break;
       case 'thud': beep(140, 0.1, 'square', 0.04); break;
       case 'dash': beep(200, 0.1, 'sine', 0.04, 300); break;
       case 'br': fx.push({ k, x: 480, y: 320, t0: now, life: 1000 }); beep(90, 0.8, 'sawtooth', 0.08, 40); break;
@@ -363,7 +463,7 @@ function draw(snap, age, now) {
 
   const list = snap.pl.slice().sort((a, b) => a.y - b.y);
   for (const p of list) {
-    const [x, y] = pos(p, age);
+    const [x, y] = (p.id === myId && mode === 'mp' && NET.pred) ? [NET.pred.x + NET.err.x, NET.pred.y + NET.err.y] : pos(p, age);
     if (!p.al) { if (!p.dc) { ctx.save(); ctx.globalAlpha = 0.5; ctx.fillStyle = '#fff'; ctx.font = 'bold 20px sans-serif'; ctx.textAlign = 'center'; ctx.restore(); } continue; }
     ctx.save();
     ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.beginPath(); ctx.ellipse(x, y + 16, 14, 5, 0, 0, 7); ctx.fill();
@@ -374,10 +474,10 @@ function draw(snap, age, now) {
     const face = Math.cos(aimAngle) < 0 ? -1 : 1, img = fishImgs[p.v];
     const bob = p.dh ? 0 : (Math.abs(p.vx) + Math.abs(p.vy) > 10 ? Math.sin(now / 60) * 1.5 : 0);
 
-    const ax = Math.cos(aimAngle), ay = Math.sin(aimAngle), px = -ay, py = ax;
+    const ax = Math.cos(aimAngle), ay = Math.sin(aimAngle), px = -ay, py = ax, hdShown = shownHeld(p, now);
     if (!p.dc && V[p.v]) {
-      if (p.hd >= 1) drawBoom(x + ax * 16 + px * 12, y + ay * 16 + py * 12, aimAngle + 0.4, V[p.v].body, 1);
-      if (p.hd >= 2) drawBoom(x + ax * 16 - px * 12, y + ay * 16 - py * 12, aimAngle - 0.4, V[p.v].body, 1);
+      if (hdShown >= 1) drawBoom(x + ax * 16 + px * 12, y + ay * 16 + py * 12, aimAngle + 0.4, V[p.v].body, 1);
+      if (hdShown >= 2) drawBoom(x + ax * 16 - px * 12, y + ay * 16 - py * 12, aimAngle - 0.4, V[p.v].body, 1);
     }
     ctx.translate(x, y + bob); if (p.dh) { ctx.rotate(face * 0.35); }
     ctx.scale(face * 0.72, 0.72); if (img && img.complete) ctx.drawImage(img, -26.85, -23.7, 53.7, 47.44);
@@ -387,7 +487,8 @@ function draw(snap, age, now) {
     if (p.sh) { ctx.strokeStyle = 'rgba(120,230,255,0.9)'; ctx.fillStyle = 'rgba(120,230,255,0.18)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(x, y, 24, 0, 7); ctx.fill(); ctx.stroke(); }
     if (p.tk) { ctx.strokeStyle = '#d68bff'; ctx.lineWidth = 2; ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.arc(x, y, 260, 0, 7); ctx.stroke(); ctx.setLineDash([]); }
     if (lmbHeld && !recallHold && p.id === myId) { ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 3; ctx.setLineDash([2, 10]); ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(x + Math.cos(aimAngle) * 26, y + Math.sin(aimAngle) * 26); ctx.lineTo(x + Math.cos(aimAngle) * 190, y + Math.sin(aimAngle) * 190); ctx.stroke(); ctx.setLineDash([]); ctx.lineCap = 'butt'; }
-    if (p.sl > 0) { ctx.strokeStyle = `rgba(255,255,255,${p.sl})`; ctx.lineWidth = 6; ctx.beginPath(); ctx.arc(x, y, 38, aimAngle - 1.3 + (1 - p.sl) * 0.8, aimAngle + 1.3 - p.sl * 0.2 * 0); ctx.stroke(); }
+    const slv = shownSlash(p, now);
+    if (slv > 0) { ctx.strokeStyle = `rgba(255,255,255,${slv})`; ctx.lineWidth = 6; ctx.beginPath(); ctx.arc(x, y, 38, aimAngle - 1.3 + (1 - slv) * 0.8, aimAngle + 1.3 - slv * 0.2 * 0); ctx.stroke(); }
     if (p.bm) { ctx.fillStyle = '#ff6b6b'; ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('?!', x, y - 32); }
     if (!p.dc) {
       ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'center'; ctx.lineWidth = 3; ctx.strokeStyle = '#120b1c'; ctx.fillStyle = p.id === myId ? '#ffc83b' : '#fff';
@@ -411,6 +512,7 @@ function draw(snap, age, now) {
     else if (f.k === 'pk') { ctx.strokeStyle = '#7fd0ff'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(f.x, f.y, 10 + 24 * t, 0, 7); ctx.stroke(); }
     else if (f.k === 'tp') { ctx.strokeStyle = '#d68bff'; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(f.x, f.y, 6 + 28 * t, 0, 7); ctx.stroke(); }
     else if (f.k === 'hit' || f.k === 'sh') { ctx.strokeStyle = f.k === 'sh' ? '#7fe8ff' : '#fff'; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(f.x, f.y, 8 + 26 * t, 0, 7); ctx.stroke(); }
+    else if (f.k === 'bnc') { ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.lineCap = 'round'; for (let i = 0; i < 6; i++) { const a = i * 1.047; ctx.beginPath(); ctx.moveTo(f.x + Math.cos(a) * (5 + 6 * t), f.y + Math.sin(a) * (5 + 6 * t)); ctx.lineTo(f.x + Math.cos(a) * (9 + 14 * t), f.y + Math.sin(a) * (9 + 14 * t)); ctx.stroke(); } }
     else if (f.k === 'br') { ctx.strokeStyle = '#ff4040'; ctx.lineWidth = 12; ctx.strokeRect(0, 0, 960, 640); }
     ctx.restore();
   }
@@ -422,6 +524,7 @@ function drawHUD(snap, me, now) {
   if (!ctx) return;
   ctx.setTransform(sc, 0, 0, sc, offX, offY);
   ctx.textBaseline = 'alphabetic';
+  if (mode === 'mp' && NET.rtt) { ctx.save(); ctx.textAlign = 'right'; ctx.font = 'bold 12px sans-serif'; ctx.fillStyle = NET.rtt < 60 ? '#7fe08a' : NET.rtt < 120 ? '#ffc83b' : '#ff7a6b'; ctx.fillText(Math.round(NET.rtt) + ' ms', 952, 634); ctx.restore(); }
 
   const real = snap.pl.filter(p => !p.dc);
   ctx.font = 'bold 15px sans-serif'; ctx.textAlign = 'left';
@@ -462,7 +565,7 @@ function drawHUD(snap, me, now) {
 }
 
 // ---------- main loop ----------
-let lastT = performance.now(), acc = 0;
+let lastT = performance.now(), acc = 0, netAcc = 0;
 function frame(nowT) {
   const dtReal = Math.min(0.1, (nowT - lastT) / 1000); lastT = nowT;
   let snap = null, age = 0;
@@ -474,19 +577,22 @@ function frame(nowT) {
     snap = match.snapshot(); snap._sp = true; lastSnap = snap; playEvents(snap.ev);
     if (match.finished) { toMenu(); }
   } else if (mode === 'mp') {
+    netAcc += dtReal; let n = 0;
+    while (netAcc >= G.DT && n < 4) { mpTick(); netAcc -= G.DT; n++; }
+    if (netAcc > G.DT) netAcc = 0;
+    if (NET.err.x || NET.err.y) {
+      const k = Math.exp(-dtReal / 0.08); NET.err.x *= k; NET.err.y *= k;
+      if (Math.abs(NET.err.x) < 0.02 && Math.abs(NET.err.y) < 0.02) NET.err.x = NET.err.y = 0;
+    }
     snap = lastSnap; age = (nowT - lastSnapAt) / 1000;
   }
   draw(snap, age, nowT);
   requestAnimationFrame(frame);
 }
 
-setInterval(() => {
-  if (mode !== 'mp' || !ws || !lastSnap) return;
-  const i = buildInput(lastSnap);
-  wsSend({ t: 'input', mx: i.mx, my: i.my, aim: +i.aim.toFixed(3), dh: i.dh, tt: i.tt, mm: i.mm, dd: i.dd, rr: i.rr });
-  latch.t = latch.m = latch.d = latch.r = false;
-}, 16);
+setInterval(() => { if (mode === 'mp') wsSend({ t: 'ping', c: performance.now() }); }, 1000);
 
+if (/[?&]debug\b/.test(location.search)) window.__mg = { disp: () => { const m = mySnap(lastSnap); return m ? myDisp(m) : null; }, snap: () => lastSnap, net: NET };
 requestAnimationFrame(frame);
 show('menu');
-})();
+})();
