@@ -11,7 +11,7 @@
   canvas { position:fixed; inset:0; width:100%; height:100%; display:block; }
   #ui { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; background:radial-gradient(circle at 50% 30%, #1d5a6a, #0c2027 70%); overflow:auto; padding:16px; }
   #ui.hidden, .hidden { display:none !important; }
-  .panel { background:var(--panel); border:3px solid #0c2027; border-radius:16px; padding:22px 26px; width:min(520px,100%); box-shadow:0 10px 0 #0c2027; }
+  .panel { background:var(--panel); border:3px solid #0c2027; border-radius:16px; padding:22px 26px; width:min(520px,100%); box-shadow:0 10px 0 #0c2027; max-height:92vh; overflow-y:auto; }
   h1 { margin:0 0 4px; font-size:44px; letter-spacing:1px; color:var(--accent); text-shadow:0 4px 0 #0c2027; }
   h2 { margin:0 0 10px; }
   .sub { color:var(--muted); margin:0 0 16px; }
@@ -35,6 +35,10 @@
   .err { color:#ff9c8f; min-height:20px; margin-top:8px; }
   #leave { position:fixed; top:8px; right:8px; z-index:5; padding:6px 12px; font-size:14px; opacity:.8; }
   .hint { color:var(--muted); font-size:13px; margin-top:12px; line-height:1.5; }
+  .pu-header { margin-top:14px; font-weight:bold; font-size:15px; color:var(--accent); }
+  .pu-grid { display:grid; grid-template-columns:repeat(2, 1fr); gap:6px 12px; margin:6px 0 12px; background:#0f2b34; padding:10px 12px; border-radius:10px; border:2px solid #2d6272; max-height:160px; overflow-y:auto; }
+  .pu-grid label { font-size:13px; margin:0; justify-content:flex-start; gap:8px; cursor:pointer; }
+  .pu-grid input[type=checkbox] { width:16px; height:16px; min-width:auto; }
 </style>
 </head>
 <body>

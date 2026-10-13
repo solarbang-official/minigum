@@ -53,6 +53,12 @@ function sanitizeSettings(s) {
   o.underdog = !!s.underdog;
   const ai = parseInt(s.ai); o.ai = Number.isNaN(ai) ? 1 : clamp(ai, 0, 2);
   const b = parseInt(s.bots); o.bots = Number.isNaN(b) ? 0 : clamp(b, 0, 5);
+  if (Array.isArray(s.pus)) {
+    o.pus = s.pus.filter(id => PU_IDS.includes(id));
+    if (o.pus.length === 0) o.pus = PU_IDS.slice();
+  } else {
+    o.pus = PU_IDS.slice();
+  }
   return o;
 }
 
@@ -237,8 +243,10 @@ class Round {
     this.ev('pu_ann', p.id, p.name, id, 'get');
   }
   pickRandomPU(p) {
-    let id; for (let i = 0; i < 6; i++) { id = PU_IDS[Math.floor(Math.random() * PU_IDS.length)]; if (!p.pu.includes(id)) break; }
-    return id;
+    const allowed = (this.set.pus && this.set.pus.length > 0) ? this.set.pus : PU_IDS;
+    const unowned = allowed.filter(id => !p.pu.includes(id));
+    const pool = unowned.length > 0 ? unowned : allowed;
+    return pool[Math.floor(Math.random() * pool.length)];
   }
   spawnDecoy(p) {
     const d = { id: 'dc' + (this.dcN++), dc: true, owner: p, x: p.x + 30, y: p.y, vx: 0, vy: 0, alive: true, variant: p.variant, aim: p.aim, dir: Math.random() * 6.28, wt: 0, life: 45 };
