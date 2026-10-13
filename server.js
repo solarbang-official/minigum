@@ -138,7 +138,7 @@ wss.on('connection', ws => {
         if (c.room) return;
         c.name = cleanName(m.name); c.variant = Number.isInteger(m.variant) ? m.variant : 0;
         if (m.t === 'create') {
-          const room = { code: newCode(), host: c.id, clients: new Map(), settings: G.sanitizeSettings({ bots: 2 }), match: null };
+          const room = { code: newCode(), host: c.id, clients: new Map(), settings: G.sanitizeSettings({ bots: 0 }), match: null };
           rooms.set(room.code, room); joinRoom(c, room);
         } else {
           const room = rooms.get(String(m.code || '').toUpperCase().trim());

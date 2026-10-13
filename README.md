@@ -59,6 +59,18 @@ WebSocket upgrades (the client uses `wss://` automatically on https pages). Ngin
 - **Obstacles**: maps are built from rocks, crates, hedges/bushes, barrels and stone pillars (each map has its own
   look: meadow, sand, stone courtyard or forest). The Disguise power-up turns you into one of the obstacle types used on the
   current map, so you blend in.
+- **Boomerang options** (host/single-player setup, all off by default except bounce): **Pull back**: hold the throw button (or press E/R)
+  to pull your boomerangs back; when off, a boomerang that has landed is only retrieved by walking over it.
+  **Homing boomerangs**: thrown boomerangs curve slightly towards an enemy in front of them.
+  Returning boomerangs still collide with obstacles: the boomerang still tries to fly back, and when it hits an obstacle it
+  stops and waits on the ground until its owner walks over it.
+- Options tied to a scoring mode only appear when that mode is selected (e.g. *Golden holder can throw it* only for Golden
+  Boomerang; the target field reads "Kills to win" in Point-per-kill mode).
+- **Golden holder can throw it** (default off = melee only): the carrier's boomerang is always gold, whatever their gum.
+  With throwing allowed, the hold timer pauses while the boomerang is out of their hand. With melee only, left click, right
+  click and K all slash.
+- **Power-ups carry over between rounds** (default off): when off, everyone starts each round without power-ups.
+- A new online room starts with 0 bots (the host can add some; empty slots are only filled when fewer than 2 people join).
 - **Fire and Ice boomerangs never hurt the player who threw them** (for example when it flies back through its own trail).
 
 ## Controls

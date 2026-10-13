@@ -12,6 +12,7 @@ const SLASH_T = 0.22;
 const DT = 1 / 60;                          // fixed simulation step: server, offline single-player and client prediction all use it
 const BOUNCE_MAX = 3, BOUNCE_SPEED = 0.5;   // a boomerang can bounce off walls 3 times, losing half its speed each time, then stops at the next wall
 
+const HOMING_TURN = 1.2;   // rad/s a homing boomerang can curve
 const GOLD_TIME = 14, RESPAWN_TIME = 3, GOLD_OFF = ['explosive', 'multi', 'fire', 'ice', 'telekinesis', 'teleport'];   // golden boomerang mode: hold it 14 s (total) to win; boomerang power-ups are off while you carry it
 const B_SPEEDS = { slow: 380, normal: 520, fast: 700, insane: 900 };
 
@@ -61,6 +62,10 @@ function sanitizeSettings(s) {
   o.boomSpeed = ['slow', 'normal', 'fast', 'insane'].includes(s.boomSpeed) ? s.boomSpeed : 'normal';
   o.underdog = !!s.underdog;
   o.bounce = s.bounce === undefined ? true : !!s.bounce;   // boomerangs bounce off walls by default
+  o.pullBack = !!s.pullBack;     // hold the throw button to pull dropped boomerangs back (otherwise walk over them)
+  o.homing = !!s.homing;         // thrown boomerangs arc slightly towards enemies
+  o.goldThrow = !!s.goldThrow;   // golden boomerang mode: may the holder throw it? (off = melee only)
+  o.puCarry = !!s.puCarry;       // power-ups carry over into the next round
   const ai = parseInt(s.ai); o.ai = Number.isNaN(ai) ? 1 : clamp(ai, 0, 2);
   const b = parseInt(s.bots); o.bots = Number.isNaN(b) ? 0 : clamp(b, 0, 5);
   if (Array.isArray(s.pus)) {
@@ -235,9 +240,9 @@ class Round {
   stepGold(dt) {
     const g = this.gold; if (!g || this.over) return;
     if (!g.holder) {
-      for (const p of this.players) if (p.alive && Math.hypot(p.x - g.x, p.y - g.y) < 26) { g.holder = p; p.gold = true; p.disg = -1; this.ev('gold', p.x, p.y); break; }
+      for (const p of this.players) if (p.alive && Math.hypot(p.x - g.x, p.y - g.y) < 26) { g.holder = p; p.gold = true; p.disg = -1; for (const b of p.boom.slice()) if (b.s !== 'held') this.catchB(p, b); this.ev('gold', p.x, p.y); break; }
     } else if (g.holder.alive) {
-      const h = g.holder; h.goldT += dt;
+      const h = g.holder; if (h.boom.some(b => b.s === 'held' && !b.temp)) h.goldT += dt;   // counts while the golden boomerang is in your hand
       if (h.goldT >= GOLD_TIME) { h.goldT = GOLD_TIME; this.over = true; this.winner = h; }
     }
   }
@@ -309,6 +314,11 @@ class Round {
     b.x = d.x + Math.cos(d.aim) * 40; b.y = d.y + Math.sin(d.aim) * 40;
     this.ev('defl', b.x, b.y);
   }
+  // a boomerang that can't get back lands where it is (and comes straight back to hand if that is over water, a pit or off screen)
+  waitB(b) {
+    b.s = 'drop'; b.vx = b.vy = 0; b.dfl = null; this.ev('thud', b.x, b.y);
+    if (this.deadly(b.x, b.y) || b.x < 2 || b.y < 2 || b.x > W - 2 || b.y > H - 2) this.catchB(b.o, b);
+  }
   catchB(p, b) {
     b.dfl = null;
     if (b.temp) { const i = p.boom.indexOf(b); if (i >= 0) p.boom.splice(i, 1); }
@@ -379,8 +389,8 @@ class Round {
     } else {
       const tk = this.has(p, 'telekinesis') && inp.dh && p.boom.some(b => b.s !== 'held' && Math.hypot(b.x - p.x, b.y - p.y) < TK_R);
       p.tk = tk;
-      if (aR) for (const b of p.boom) if (b.s === 'drop' || b.s === 'fly') { b.s = 'ret'; }
-      if (aT) this.doThrow(p);
+      if (aR && this.set.pullBack) for (const b of p.boom) if (b.s === 'drop' || b.s === 'fly') { b.s = 'ret'; }
+      if (aT && !(p.gold && !this.set.goldThrow)) this.doThrow(p);
       if (aM && p.slashCd <= 0) this.doSlash(p);
       if (aD && !tk && p.dashCd <= 0 && !dashing) this.doDash(p, mx, my);
       dashing = p.dashT > 0;
@@ -446,10 +456,27 @@ class Round {
     }
   }
 
+  // homing boomerangs: curve gently towards the best enemy in front of them
+  steer(b, p, dt) {
+    const by = b.dfl || p, sp = Math.hypot(b.vx, b.vy); if (sp < 1) return;
+    const heading = Math.atan2(b.vy, b.vx); let best = null, bs = 1e9, bda = 0;
+    for (const t of this.targets()) {
+      if (t === by || (t.dc && t.owner === by)) continue;
+      const dx = t.x - b.x, dy = t.y - b.y, d = Math.hypot(dx, dy); if (d > 600 || d < 18) continue;
+      let da = Math.atan2(dy, dx) - heading; da = Math.atan2(Math.sin(da), Math.cos(da));
+      if (Math.abs(da) > 1.05 || this.blocked(b.x, b.y, t.x, t.y)) continue;
+      const sc = d * (1 + Math.abs(da)); if (sc < bs) { bs = sc; best = t; bda = da; }
+    }
+    if (!best) return;
+    const a = heading + clamp(bda, -HOMING_TURN * dt, HOMING_TURN * dt);
+    b.vx = Math.cos(a) * sp; b.vy = Math.sin(a) * sp;
+  }
+
   stepBooms(dt) {
     for (const p of this.players) {
       for (const b of p.boom.slice()) {
         if (b.s === 'held') continue;
+        if (b.s === 'drop' && p.alive && Math.hypot(p.x - b.x, p.y - b.y) < 22) { this.catchB(p, b); continue; }   // walk over a dropped boomerang to pick it up
         if (b.fuse > 0) { b.fuse -= dt; if (b.fuse <= 0) { this.explode(p, b); continue; } }
         if (b.dflT > 0) b.dflT -= dt;
         if ((b.s === 'fly' || b.s === 'ret') && !(b.dflT > 0)) {
@@ -474,6 +501,7 @@ class Round {
           // The outbound range is counted at full speed, so a slowed (bounced) boomerang still covers the
           // same total distance, just more slowly. That is what lets it reach its 3 bounces and the final wall.
           if (!b.ctl) b.t += dt * b.sp;
+          if (this.set.homing && !b.ctl) this.steer(b, p, dt);
           let px = b.x, py = b.y, stopped = false;
           const n = Math.max(1, Math.ceil(Math.hypot(b.vx, b.vy) * dt / 3));   // sub-steps so it touches walls instead of stopping short
           const sx = b.vx * dt / n, sy = b.vy * dt / n;
@@ -502,9 +530,12 @@ class Round {
         } else if (b.s === 'ret') {
           const dx = p.x - b.x, dy = p.y - b.y, d = Math.hypot(dx, dy);
           if (d < 20) { this.catchB(p, b); continue; }
+          // A returning boomerang still hits obstacles. With no clear path back to its owner it simply waits where it is
+          // until the owner comes to pick it up.
           const k = Math.min(1, 8 * dt);
           b.vx += (dx / d * B_RET - b.vx) * k; b.vy += (dy / d * B_RET - b.vy) * k;
           const nx = b.x + b.vx * dt, ny = b.y + b.vy * dt;
+          if (this.wallHit(nx, ny, B_R)) { this.waitB(b); continue; }
           this.trail(p, b, nx, ny); b.x = nx; b.y = ny;
         }
         if (b.s === 'fly' || b.s === 'ret') {
@@ -585,11 +616,11 @@ class Round {
         } else {
           let db = null, dd = 1e9;
           for (const q of p.boom) if (q.s === 'drop') { const d = Math.hypot(q.x - p.x, q.y - p.y); if (d < dd) { dd = d; db = q; } }
-          if (db && dd < 120) toward(db.x, db.y, 1.2);
+          if (db && (dd < 120 || (!this.set.pullBack && (!near || nd > 90)))) toward(db.x, db.y, this.set.pullBack ? 1.2 : 2);   // no pull back: fetch it on foot
           else if (nd < 220) toward(p.x * 2 - near.x, p.y * 2 - near.y, 1);
         }
       }
-      if (p.boom.some(q => q.s === 'drop') && Math.random() < dt * 4) inp.r = true;
+      if (this.set.pullBack && p.boom.some(q => q.s === 'drop') && Math.random() < dt * 4) inp.r = true;
     }
 
     if (ai.dodge <= 0) {
@@ -631,7 +662,7 @@ class Round {
       inp.aim = Math.atan2(ty - p.y, tx - p.x);
       if (held) {
         if (nd < 50 && p.slashCd <= 0) inp.m = true;
-        else if (nd < 420 && ai.cool <= 0 && !this.blocked(p.x, p.y, near.x, near.y)) {
+        else if (nd < 420 && ai.cool <= 0 && !(p.gold && !this.set.goldThrow) && !this.blocked(p.x, p.y, near.x, near.y)) {
           const err = [0.45, 0.2, 0.1][lvl];
           inp.aim += (Math.random() - 0.5) * 2 * err; inp.t = true;
           ai.cool = [1.5, 0.9, 0.5][lvl] + Math.random() * 0.7;
@@ -747,7 +778,7 @@ class Match {
         this.winnerId = g.winner ? g.winner.id : null;
         if ((this.set.mode === 'last' || this.set.mode === 'golden') && g.winner) this.scores[g.winner.id]++;
         for (const p of g.players) {
-          this.playerPUs[p.id] = p.pu.slice();
+          this.playerPUs[p.id] = this.set.puCarry ? p.pu.slice() : [];
         }
       }
     } else if (this.phase === 'over') {

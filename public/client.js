@@ -9,8 +9,9 @@ const fishSrc = i => V[i] ? 'data:image/svg+xml;charset=utf-8,' + encodeURICompo
 const fishImgs = V.map((v, i) => { const im = new Image(); im.src = fishSrc(i); return im; });
 
 // ---------- state ----------
+let curSet = {};   // settings of the match being played
 let myName = localStorage.mgName || '', myVar = +localStorage.mgVar || 0;
-let spSettings = Object.assign({ arenas: A.list.map((_, i) => i), mode: 'last', target: 5, books: 'normal', boomSpeed: 'normal', bounce: true, underdog: false, ai: 1, bots: 3, pus: G.PU_IDS ? G.PU_IDS.slice() : [] }, safeParse(localStorage.mgSP));
+let spSettings = Object.assign({ arenas: A.list.map((_, i) => i), mode: 'last', target: 5, books: 'normal', boomSpeed: 'normal', bounce: true, pullBack: false, homing: false, goldThrow: false, puCarry: false, underdog: false, ai: 1, bots: 3, pus: G.PU_IDS ? G.PU_IDS.slice() : [] }, safeParse(localStorage.mgSP));
 function safeParse(s) { try { return JSON.parse(s) || {}; } catch (e) { return {}; } }
 let mode = 'menu';
 let ws = null, myId = null, room = null;
@@ -20,7 +21,7 @@ let announcements = [];
 
 // ---------- settings (saved in this browser) ----------
 const DEFAULT_BINDS = { up: ['w', 'ArrowUp'], down: ['s', 'ArrowDown'], left: ['a', 'ArrowLeft'], right: ['d', 'ArrowRight'], throw: ['j', ''], slash: ['k', ''], dash: [' ', 'Shift'], recall: ['e', 'r'] };
-const ACTIONS = [['up', 'Move up'], ['down', 'Move down'], ['left', 'Move left'], ['right', 'Move right'], ['throw', 'Throw'], ['slash', 'Melee slash'], ['dash', 'Dash / telekinesis'], ['recall', 'Recall boomerangs']];
+const ACTIONS = [['up', 'Move up'], ['down', 'Move down'], ['left', 'Move left'], ['right', 'Move right'], ['throw', 'Throw'], ['slash', 'Melee slash'], ['dash', 'Dash / telekinesis'], ['recall', 'Pull back boomerangs (if enabled)']];
 const DEFAULT_CFG = { master: 1, music: 0.35, sfx: 1, quality: 'high', effects: true, water: true, names: true, aimGuide: true, hints: true, ping: true, fps: false };
 let cfg = sanitizeCfg(safeParse(localStorage.mgCfg));
 let binds = loadBinds();
@@ -113,10 +114,14 @@ function formHTML(botsLabel, botsMin) {
   <div class="row maprow"><button type="button" class="sec small" data-mapsel="all">Select all</button><button type="button" class="sec small" data-mapsel="none">Deselect all</button></div>
   <div class="map-grid">${arenas.map((a, i) => `<label class="map-card" title="${a.name}"><input type="checkbox" data-map="${i}"><canvas width="132" height="88" data-thumb="${i}"></canvas><span>${i + 1}. ${a.name}</span></label>`).join('')}</div>
   <label class="field-label">Scoring <select data-k="mode"><option value="last">👑 Last one standing</option><option value="kill">⚔️ Point per kill</option><option value="golden">\u{1F3C6} Golden Boomerang (hold it 14s)</option></select></label>
-  <label class="field-label">Points to win (rounds) <input data-k="target" type="number" min="1" max="25"></label>
+  <label class="field-label"><span data-targetlabel>Rounds to win</span> <input data-k="target" type="number" min="1" max="25"></label>
   <label class="field-label">Blue book spawn <select data-k="books"><option value="off">Off</option><option value="slow">Slow</option><option value="normal">Normal</option><option value="fast">Fast</option></select></label>
   <label class="field-label">Boomerang Speed <select data-k="boomSpeed"><option value="slow">Slow</option><option value="normal">Normal</option><option value="fast">Fast</option><option value="insane">Insane</option></select></label>
   <label class="field-label">Boomerangs bounce off walls <input data-k="bounce" type="checkbox"></label>
+  <label class="field-label" title="Hold the throw button to pull your boomerangs back. Off: walk over them to pick them up.">Pull back (hold throw to recall) <input data-k="pullBack" type="checkbox"></label>
+  <label class="field-label" title="Thrown boomerangs arc slightly towards enemy players.">Homing boomerangs <input data-k="homing" type="checkbox"></label>
+  <label class="field-label" data-mode="golden" title="Golden Boomerang mode: off means the holder can only use melee.">Golden holder can throw it <input data-k="goldThrow" type="checkbox"></label>
+  <label class="field-label" title="Keep your power-ups when the next round starts.">Power-ups carry over between rounds <input data-k="puCarry" type="checkbox"></label>
   <label class="field-label">Losers start with shield <input data-k="underdog" type="checkbox"></label>
   <label class="field-label">AI skill <select data-k="ai"><option value="0">Easy</option><option value="1">Normal</option><option value="2">Hard</option></select></label>
   <label class="field-label">${botsLabel} <input data-k="bots" type="number" min="${botsMin}" max="5"></label>
@@ -141,7 +146,12 @@ function wireMapPicker(el) {
     for (const cb of el.querySelectorAll('[data-map]')) cb.checked = b.dataset.mapsel === 'all';
     updateMapCount(el); el.dispatchEvent(new Event('change', { bubbles: true }));
   });
-  el.addEventListener('change', e => { if (e.target.matches && e.target.matches('[data-map]')) updateMapCount(el); });
+  el.addEventListener('change', e => { if (e.target.matches && e.target.matches('[data-map]')) updateMapCount(el); if (e.target.matches && e.target.matches('[data-k=mode]')) syncModeOptions(el, e.target.value); });
+}
+// options that belong to one scoring mode only show while that mode is selected
+function syncModeOptions(el, mode) {
+  for (const e of el.querySelectorAll('[data-mode]')) e.classList.toggle('hidden', e.dataset.mode !== mode);
+  const t = el.querySelector('[data-targetlabel]'); if (t) t.textContent = mode === 'kill' ? 'Kills to win' : 'Rounds to win';
 }
 function fillForm(el, v, disabled) {
   if (!el) return;
@@ -149,7 +159,7 @@ function fillForm(el, v, disabled) {
   const sel = Array.isArray(v.arenas) ? v.arenas : A.list.map((_, i) => i);
   for (const cb of el.querySelectorAll('[data-map]')) { cb.checked = sel.includes(+cb.dataset.map); cb.disabled = !!disabled; }
   for (const b of el.querySelectorAll('[data-mapsel]')) b.disabled = !!disabled;
-  updateMapCount(el); paintThumbs(el);
+  updateMapCount(el); paintThumbs(el); syncModeOptions(el, v.mode || 'last');
   const enabledPUs = Array.isArray(v.pus) ? v.pus : (G.PU_IDS || []);
   for (const cb of el.querySelectorAll('[data-pu]')) {
     cb.checked = enabledPUs.includes(cb.dataset.pu);
@@ -183,7 +193,7 @@ if ($('#spStart')) $('#spStart').onclick = () => {
 };
 
 function startGame(m, inf, set, mt) {
-  mode = m; infos = inf; names = {}; varOf = {}; announcements = [];
+  curSet = set || {}; mode = m; infos = inf; names = {}; varOf = {}; announcements = [];
   for (const i of inf) { names[i.id] = i.name; varOf[i.id] = i.variant; }
   closeSettings(); setPause(false); releaseInput();
   match = mt; lastSnap = null; myId = m === 'sp' ? 'me' : myId; show(null); if ($('#leave')) $('#leave').classList.remove('hidden'); hintT = performance.now();
@@ -311,20 +321,21 @@ if (cv) {
   cv.addEventListener('mousedown', e => {
     if (mode !== 'sp' && mode !== 'mp') return;
     if (uiOpen()) return;
-    if (e.button === 0) { lmbHeld = true; recallHold = !canThrow(lastSnap); }
+    if (e.button === 0) { lmbHeld = true; const me0 = mySnap(lastSnap); lmbSlash = !!(me0 && me0.gh && !curSet.goldThrow); recallHold = !lmbSlash && !canThrow(lastSnap); }
     else if (e.button === 2) { latch.m = true; netAct('m'); }
     ensureAudio(); playBGM(); e.preventDefault();
   });
   cv.addEventListener('contextmenu', e => e.preventDefault());
 }
-let lmbHeld = false, recallHold = false;
+let lmbHeld = false, recallHold = false, lmbSlash = false;
 function canThrow(snap) {
   const me = snap && snap.pl.find(p => p.id === myId); if (!me) return true;
   const idx = snap.pl.filter(p => !p.dc).findIndex(p => p.id === myId);
   const out = snap.bo.some(o => o[3] === idx);
-  return me.hd > 0 && !(me.pu.includes('multi') && out);
+  if (me.gh && !curSet.goldThrow) return false;   // golden boomerang, melee only
+  return me.hd > 0 && !(me.pu.includes('multi') && out && !me.gh);
 }
-addEventListener('mouseup', e => { if (e.button === 0 && lmbHeld) { lmbHeld = false; if (!recallHold && (mode === 'sp' || mode === 'mp')) { latch.t = true; netAct('t'); } recallHold = false; } });
+addEventListener('mouseup', e => { if (e.button === 0 && lmbHeld) { lmbHeld = false; if (lmbSlash) { if (mode === 'sp' || mode === 'mp') { latch.m = true; netAct('m'); } } else if (!recallHold && (mode === 'sp' || mode === 'mp')) { latch.t = true; netAct('t'); } recallHold = false; lmbSlash = false; } });
 addEventListener('blur', releaseInput);
 
 let lastAim = 0;
@@ -461,7 +472,7 @@ function renderSettings() {
       const cap = capturing && capturing.action === a && capturing.slot === i, k = binds[a][i];
       return `<button type="button" class="keybtn${cap ? ' cap' : ''}${!k && !cap ? ' empty' : ''}" data-act="${a}" data-slot="${i}">${cap ? 'press a key…' : keyName(k)}</button>`;
     }).join('') + '</div>').join('') +
-      `<div class="setnote">Click a key, then press the new one (Backspace clears it, Esc cancels). Mouse: hold left click to aim and release to throw, hold it with nothing in hand to recall, right click to slash. Esc opens the pause menu.</div>` +
+      `<div class="setnote">Click a key, then press the new one (Backspace clears it, Esc cancels). Mouse: hold left click to aim and release to throw, hold it with nothing in hand to pull boomerangs back (when Pull back is on), right click to slash. Esc opens the pause menu.</div>` +
       `<div class="row"><button type="button" class="sec small" id="btnResetKeys">Reset controls to default</button></div>`;
   }
 }
@@ -670,6 +681,8 @@ function layerFor(idx) {
 }
 function paintThumb(cnv, idx) { const a = A.list[idx]; if (a && cnv && cnv.getContext) { const g = cnv.getContext('2d'); g.clearRect(0, 0, cnv.width, cnv.height); renderArena(g, a, idx, cnv.width / 960); } }
 
+const GOLD_COL = '#ffd53a';
+const boomCol = pl => pl && pl.gh ? GOLD_COL : (pl && V[pl.v] ? V[pl.v].body : '#d9a54a');
 function drawBoom(x, y, rot, col, alpha) {
   if (!ctx) return;
   ctx.save(); ctx.translate(x, y); ctx.rotate(rot); ctx.globalAlpha = alpha == null ? 1 : alpha; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
@@ -768,7 +781,7 @@ function draw(snap, age, now) {
   }
 
   const real = snap.pl.filter(p => !p.dc);
-  for (const o of snap.bo) if (o[2] === 2) { const own = real[o[3]]; drawBoom(o[0], o[1], 0.6, (own && V[own.v]) ? V[own.v].body : '#d9a54a', 0.8); }
+  for (const o of snap.bo) if (o[2] === 2) { const own = real[o[3]]; drawBoom(o[0], o[1], 0.6, boomCol(own), 0.8); }
 
   const list = snap.pl.slice().sort((a, b) => a.y - b.y);
   for (const p of list) {
@@ -786,8 +799,8 @@ function draw(snap, age, now) {
 
     const ax = Math.cos(aimAngle), ay = Math.sin(aimAngle), px = -ay, py = ax, hdShown = shownHeld(p, now);
     if (!p.dc && V[p.v]) {
-      if (hdShown >= 1) drawBoom(x + ax * 16 + px * 12, y + ay * 16 + py * 12, aimAngle + 0.4, V[p.v].body, 1);
-      if (hdShown >= 2) drawBoom(x + ax * 16 - px * 12, y + ay * 16 - py * 12, aimAngle - 0.4, V[p.v].body, 1);
+      if (hdShown >= 1) drawBoom(x + ax * 16 + px * 12, y + ay * 16 + py * 12, aimAngle + 0.4, boomCol(p), 1);
+      if (hdShown >= 2) drawBoom(x + ax * 16 - px * 12, y + ay * 16 - py * 12, aimAngle - 0.4, boomCol(p), 1);
     }
     ctx.translate(x, y + bob); if (p.dh) { ctx.rotate(face * 0.35); }
     ctx.scale(face * 0.72, 0.72); if (img && img.complete) ctx.drawImage(img, -26.85, -23.7, 53.7, 47.44);
@@ -796,7 +809,7 @@ function draw(snap, age, now) {
     if (p.bn) for (let i = 0; i < 4; i++) { const f = Math.sin(now / 60 + i * 2); ctx.fillStyle = `rgba(255,${120 + i * 30},20,0.85)`; ctx.beginPath(); ctx.arc(x - 12 + i * 8, y - 6 + f * 4 - i % 2 * 6, 6 - i * 0.4, 0, 7); ctx.fill(); }
     if (p.sh) { ctx.strokeStyle = 'rgba(120,230,255,0.9)'; ctx.fillStyle = 'rgba(120,230,255,0.18)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(x, y, 24, 0, 7); ctx.fill(); ctx.stroke(); }
     if (p.tk) { ctx.strokeStyle = '#d68bff'; ctx.lineWidth = 2; ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.arc(x, y, 260, 0, 7); ctx.stroke(); ctx.setLineDash([]); }
-    if (lmbHeld && !recallHold && cfg.aimGuide && p.id === myId) { ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 3; ctx.setLineDash([2, 10]); ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(x + Math.cos(aimAngle) * 26, y + Math.sin(aimAngle) * 26); ctx.lineTo(x + Math.cos(aimAngle) * 190, y + Math.sin(aimAngle) * 190); ctx.stroke(); ctx.setLineDash([]); ctx.lineCap = 'butt'; }
+    if (lmbHeld && !recallHold && !lmbSlash && cfg.aimGuide && p.id === myId) { ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 3; ctx.setLineDash([2, 10]); ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(x + Math.cos(aimAngle) * 26, y + Math.sin(aimAngle) * 26); ctx.lineTo(x + Math.cos(aimAngle) * 190, y + Math.sin(aimAngle) * 190); ctx.stroke(); ctx.setLineDash([]); ctx.lineCap = 'butt'; }
     const slv = shownSlash(p, now);
     if (slv > 0) { ctx.strokeStyle = `rgba(255,255,255,${slv})`; ctx.lineWidth = 6; ctx.beginPath(); ctx.arc(x, y, 38, aimAngle - 1.3 + (1 - slv) * 0.8, aimAngle + 1.3 - slv * 0.2 * 0); ctx.stroke(); }
     if (p.bm) { ctx.fillStyle = '#ff6b6b'; ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('?!', x, y - 32); }
@@ -811,7 +824,7 @@ function draw(snap, age, now) {
     const ex = Math.min(age, 0.07), x = o[0] + o[4] * ex, y = o[1] + o[5] * ex, own = real[o[3]];
     if (o[7]) { ctx.fillStyle = `rgba(255,120,20,${0.2 + 0.2 * Math.sin(now / 50)})`; ctx.beginPath(); ctx.arc(x, y, 14, 0, 7); ctx.fill(); }
     ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - o[4] * 0.04, y - o[5] * 0.04); ctx.stroke();
-    drawBoom(x, y, now / 45 + o[3], (own && V[own.v]) ? V[own.v].body : '#d9a54a', 1);
+    drawBoom(x, y, now / 45 + o[3], boomCol(own), 1);
   }
 
   fx = fx.filter(f => now - f.t0 < f.life);
@@ -877,7 +890,7 @@ function drawHUD(snap, me, now) {
   if (snap.ph === 'countdown') { big(String(Math.ceil(snap.tm)), 330); ctx.font = 'bold 20px sans-serif'; ctx.fillStyle = '#fff'; ctx.fillText(`Round ${snap.rd}`, 480, 270); if (snap.gm) { ctx.fillStyle = '#ffe36b'; ctx.fillText(`Grab the Golden Boomerang and hold it for ${snap.gm} seconds to win the round!`, 480, 390); } }
   else if (snap.ph === 'over') big(snap.w ? `${names[snap.w] || '?'} wins the round!` : 'Draw!', 330);
   else if (snap.ph === 'end') { big(`${names[snap.ch] || '?'} wins the match!`, 320, '#7fe08a'); ctx.font = 'bold 20px sans-serif'; ctx.fillStyle = '#fff'; ctx.fillText('Returning to ' + (mode === 'mp' ? 'lobby' : 'menu') + '…', 480, 370); }
-  if (cfg.hints && performance.now() - hintT < 12000 && snap.ph !== 'end') { ctx.font = '13px sans-serif'; ctx.fillStyle = 'rgba(255,255,255,0.75)'; ctx.fillText('WASD move · aim mouse · hold + release click to throw · hold click to recall · right-click slash · Space dash', 480, 586); }
+  if (cfg.hints && performance.now() - hintT < 12000 && snap.ph !== 'end') { ctx.font = '13px sans-serif'; ctx.fillStyle = 'rgba(255,255,255,0.75)'; ctx.fillText('WASD move · aim mouse · hold + release click to throw' + (curSet.pullBack ? ' · hold click to pull back' : ' · walk over boomerangs to pick them up') + ' · right-click slash · Space dash', 480, 586); }
 }
 
 // ---------- main loop ----------
