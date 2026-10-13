@@ -364,7 +364,7 @@ class Round {
 
   moveP(o, dx, dy, ghost) { moveCircle(this.arena, o, dx, dy, ghost); }
 
-  stepPlayer(p, dt) {
+stepPlayer(p, dt) {
     const inp = p.input;
     p.invuln = Math.max(0, p.invuln - dt); p.dashCd = Math.max(0, p.dashCd - dt); p.slashCd = Math.max(0, p.slashCd - dt);
     p.slash = Math.max(0, p.slash - dt); p.iceImm = Math.max(0, p.iceImm - dt); if (p.bam > 0) p.bam -= dt;
@@ -372,6 +372,7 @@ class Round {
     if (ml > 1) { mx /= ml; my /= ml; }
     if (p.bam > 0) { mx = -mx; my = -my; }
     const aT = inp.t, aM = inp.m, aD = inp.d, aR = inp.r; inp.t = inp.m = inp.d = inp.r = false;
+    p.recalling = aR;   // Track active recall button press state
     p.aim = inp.aim;
     let dashing = p.dashT > 0;
     p.tk = false; p.tkx = 0; p.tky = 0;
@@ -526,35 +527,40 @@ stepBooms(dt) {
           b.vy += ((dy / d) * B_RET - b.vy) * k;
           let nx = b.x + b.vx * dt, ny = b.y + b.vy * dt;
 
-          // When blocked by a wall during return, apply a slow perpendicular drift
           if (this.wallHit(nx, ny, B_R)) {
-            const dirX = dx / d, dirY = dy / d;
-            const perpX1 = -dirY, perpY1 = dirX;
-            const perpX2 = dirY, perpY2 = -dirX;
-            
-            // Gentle shift speed (~100 px/s instead of fast ~620 px/s)
-            const driftSpeed = 100;
-            const t1x = b.x + perpX1 * driftSpeed * dt, t1y = b.y + perpY1 * driftSpeed * dt;
-            const t2x = b.x + perpX2 * driftSpeed * dt, t2y = b.y + perpY2 * driftSpeed * dt;
-
-            const hit1 = this.wallHit(t1x, t1y, B_R);
-            const hit2 = this.wallHit(t2x, t2y, B_R);
-
-            if (!hit1 || !hit2) {
-              let chooseFirst = !hit1;
-              if (!hit1 && !hit2) {
-                const dist1 = Math.hypot(p.x - t1x, p.y - t1y);
-                const dist2 = Math.hypot(p.x - t2x, p.y - t2y);
-                chooseFirst = dist1 <= dist2;
-              }
-              const px = chooseFirst ? perpX1 : perpX2;
-              const py = chooseFirst ? perpY1 : perpY2;
+            // Only attempt a gentle lateral shift if actively recalling via button press
+            if (p.recalling) {
+              const dirX = dx / d, dirY = dy / d;
+              const perpX1 = -dirY, perpY1 = dirX;
+              const perpX2 = dirY, perpY2 = -dirX;
               
-              b.vx = px * driftSpeed;
-              b.vy = py * driftSpeed;
-              nx = b.x + b.vx * dt;
-              ny = b.y + b.vy * dt;
+              const driftSpeed = 100;
+              const t1x = b.x + perpX1 * driftSpeed * dt, t1y = b.y + perpY1 * driftSpeed * dt;
+              const t2x = b.x + perpX2 * driftSpeed * dt, t2y = b.y + perpY2 * driftSpeed * dt;
+
+              const hit1 = this.wallHit(t1x, t1y, B_R);
+              const hit2 = this.wallHit(t2x, t2y, B_R);
+
+              if (!hit1 || !hit2) {
+                let chooseFirst = !hit1;
+                if (!hit1 && !hit2) {
+                  const dist1 = Math.hypot(p.x - t1x, p.y - t1y);
+                  const dist2 = Math.hypot(p.x - t2x, p.y - t2y);
+                  chooseFirst = dist1 <= dist2;
+                }
+                const px = chooseFirst ? perpX1 : perpX2;
+                const py = chooseFirst ? perpY1 : perpY2;
+                
+                b.vx = px * driftSpeed;
+                b.vy = py * driftSpeed;
+                nx = b.x + b.vx * dt;
+                ny = b.y + b.vy * dt;
+              } else {
+                this.waitB(b);
+                continue;
+              }
             } else {
+              // Passive return: drop immediately on impact
               this.waitB(b);
               continue;
             }
@@ -572,7 +578,6 @@ stepBooms(dt) {
       }
     }
   }
-
   stepDecoys(dt) {
     for (const d of this.decoys) {
       if (!d.alive) continue;
