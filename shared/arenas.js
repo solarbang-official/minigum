@@ -53,17 +53,17 @@ const stairs = [];
 for (let i = 0; i < 5; i++) stairs.push(r(190 + i * 50, 110 + i * 40, 40, 24));
 
 const specs = [
-  { name: 'Grassy Plains' },
+  { name: 'Grassy Plains', walls: [...quad([r(240, 170, 38, 38)]), r(461, 301, 38, 38)] },
   { name: 'Pillar Park', walls: [...quad([r(250, 170, 50, 50)]), r(455, 295, 50, 50)] },
   { name: 'Crossroads', walls: [r(468, 110, 24, 150), r(468, 380, 24, 150), r(170, 308, 200, 24), r(590, 308, 200, 24)] },
-  { name: 'River Run', water: [r(440, 0, 80, 120), r(440, 180, 80, 110), r(440, 350, 80, 110), r(440, 520, 80, 120)] },
+  { name: 'River Run', walls: quad([r(250, 190, 40, 40)]), water: [r(440, 0, 80, 120), r(440, 180, 80, 110), r(440, 350, 80, 110), r(440, 520, 80, 120)] },
   { name: 'Island Hop', water: frame(480, 320, 200, 150, 36, 70), walls: [r(455, 295, 50, 50)] },
   { name: 'Cliffside', holes: [r(0, 0, 960, 64), r(0, 576, 960, 64), r(0, 64, 64, 512), r(896, 64, 64, 512)], walls: [r(430, 300, 100, 40)] },
   { name: 'Four Corners', holes: quad([r(64, 54, 150, 110)]), walls: [r(455, 295, 50, 50)] },
   { name: 'The Moat', water: frame(480, 320, 160, 120, 30, 60), walls: frame(480, 320, 90, 60, 20, 50) },
   { name: 'Checkerboard', walls: checker },
   { name: 'Maze Lite', walls: quad([r(200, 130, 24, 200), r(200, 130, 160, 24), r(330, 230, 24, 110)]) },
-  { name: 'Pond Life', water: [...quad([r(230, 160, 110, 80)]), r(430, 290, 100, 60)] },
+  { name: 'Pond Life', walls: quad([r(130, 110, 36, 36)]), water: [...quad([r(230, 160, 110, 80)]), r(430, 290, 100, 60)] },
   { name: 'Staircase', walls: [...stairs, ...stairs.map(q => mir(q, 1, 1))] },
   { name: 'Hourglass', walls: quad([r(180, 130, 260, 24), r(300, 200, 24, 70)]) },
   { name: 'Bunker', walls: [...frame(480, 320, 130, 95, 22, 64), ...quad([r(220, 160, 40, 40)])] },
@@ -72,29 +72,50 @@ const specs = [
   { name: 'Zig Zag', walls: [r(250, 50, 24, 330), r(400, 260, 24, 330), r(550, 50, 24, 330), r(700, 260, 24, 330)] },
   { name: 'Tiny Tim', bounds: r(230, 150, 500, 340), walls: [r(455, 295, 50, 50)] },
   { name: 'Wide Open', bounds: r(20, 20, 920, 600), walls: quad([r(300, 200, 40, 40)]) },
-  { name: 'Troubled Waters', water: [r(0, 250, 300, 140), r(360, 250, 180, 140), r(600, 250, 360, 140)] },
-  { name: 'The Crater', holes: [r(420, 260, 120, 120), r(390, 290, 180, 60), r(450, 230, 60, 180)] },
-  { name: 'Archipelago', holes: archi },
+  { name: 'Troubled Waters', walls: quad([r(220, 120, 44, 44)]), water: [r(0, 250, 300, 140), r(360, 250, 180, 140), r(600, 250, 360, 140)] },
+  { name: 'The Crater', walls: quad([r(250, 160, 40, 40)]), holes: [r(420, 260, 120, 120), r(390, 290, 180, 60), r(450, 230, 60, 180)] },
+  { name: 'Archipelago', walls: quad([r(269, 194, 32, 32)]), holes: archi },
   { name: 'Fortress', walls: [...quad([r(170, 110, 130, 24), r(170, 110, 24, 130)]), r(450, 290, 60, 60)] },
-  { name: 'Ditch Day', holes: [r(290, 50, 50, 200), r(290, 390, 50, 200), r(620, 50, 50, 200), r(620, 390, 50, 200)] },
+  { name: 'Ditch Day', walls: [...quad([r(160, 120, 44, 44)]), r(458, 298, 44, 44)], holes: [r(290, 50, 50, 200), r(290, 390, 50, 200), r(620, 50, 50, 200), r(620, 390, 50, 200)] },
   { name: 'Puddle Jumpers', wet: [...quad([r(230, 160, 100, 80), r(330, 250, 70, 50)]), r(420, 290, 120, 60)], walls: quad([r(380, 120, 30, 30)]) },
   { name: 'The Colosseum', bounds: r(140, 90, 680, 460), walls: [...quad([r(280, 190, 40, 40)]), r(450, 300, 60, 40)] },
   { name: 'Spiral', walls: [r(260, 160, 440, 20), r(680, 160, 20, 260), r(340, 400, 360, 20), r(340, 260, 20, 160), r(340, 260, 220, 20)] },
-  { name: 'Dunes A', walls: scatter(11, 7) },
-  { name: 'Rivers X', water: [r(450, 0, 60, 110), r(450, 170, 60, 120), r(450, 290, 60, 60), r(450, 350, 60, 120), r(450, 530, 60, 110),
+  { name: 'Dunes A', mix: true, walls: scatter(11, 7) },
+  { name: 'Rivers X', walls: quad([r(250, 150, 44, 44)]), water: [r(450, 0, 60, 110), r(450, 170, 60, 120), r(450, 290, 60, 60), r(450, 350, 60, 120), r(450, 530, 60, 110),
       r(0, 290, 160, 60), r(220, 290, 230, 60), r(510, 290, 230, 60), r(800, 290, 160, 60)] },
   { name: 'Ladder', walls: quad([r(190, 150, 240, 20), r(190, 270, 110, 20)]) },
-  { name: 'Cross Bridge Cliffs', holes: [r(240, 170, 200, 110), r(520, 170, 200, 110), r(240, 360, 200, 110), r(520, 360, 200, 110)] },
+  { name: 'Cross Bridge Cliffs', walls: quad([r(110, 100, 40, 40)]), holes: [r(240, 170, 200, 110), r(520, 170, 200, 110), r(240, 360, 200, 110), r(520, 360, 200, 110)] },
   { name: 'Shrine', walls: frame(480, 320, 90, 70, 24, 50), water: quad([r(200, 150, 100, 60)]) },
   { name: 'Hedge Maze', walls: quad([r(170, 110, 24, 150), r(170, 110, 150, 24), r(290, 200, 24, 120), r(400, 160, 24, 100), r(260, 300, 100, 24)]) },
-  { name: 'Chaos Garden', walls: scatter(22, 8) },
-  { name: 'Dunes B', walls: scatter(33, 9) },
-  { name: 'Lakeside', water: [r(0, 0, 200, 640)], walls: [r(620, 250, 40, 140), r(380, 120, 40, 40), r(380, 480, 40, 40)] },
-  { name: 'Wet Woods', walls: scatter(44, 6), wet: quad([r(300, 300, 120, 60)]) },
+  { name: 'Chaos Garden', mix: true, walls: scatter(22, 8) },
+  { name: 'Dunes B', mix: true, walls: scatter(33, 9) },
+  { name: 'Lakeside', mix: true, water: [r(0, 0, 200, 640)], walls: [r(620, 250, 40, 140), r(380, 120, 40, 40), r(380, 480, 40, 40)] },
+  { name: 'Wet Woods', mix: true, walls: scatter(44, 6), wet: quad([r(300, 300, 120, 60)]) },
 ];
 
+// Look of each map: [theme, ...obstacle kinds]. Obstacles are drawn as these objects, and the Disguise power-up turns
+// a player into one of the kinds used on the current map, so a disguised player blends in.
+const KINDS = ['rock', 'crate', 'bush', 'barrel', 'pillar'];
+const META = {
+  'Grassy Plains': ['meadow', 'rock', 'bush'], 'Pillar Park': ['meadow', 'rock'], 'Crossroads': ['meadow', 'crate'],
+  'River Run': ['meadow', 'rock', 'bush'], 'Island Hop': ['meadow', 'crate'], 'Cliffside': ['meadow', 'rock'],
+  'Four Corners': ['meadow', 'rock'], 'The Moat': ['stone', 'pillar'], 'Checkerboard': ['meadow', 'crate'],
+  'Maze Lite': ['forest', 'bush'], 'Pond Life': ['meadow', 'bush', 'rock'], 'Staircase': ['sand', 'crate'],
+  'Hourglass': ['sand', 'rock'], 'Bunker': ['stone', 'pillar', 'crate'], 'Split Decision': ['meadow', 'crate'],
+  'Stonehenge': ['stone', 'pillar'], 'Zig Zag': ['sand', 'crate', 'barrel'], 'Tiny Tim': ['meadow', 'crate'],
+  'Wide Open': ['meadow', 'bush'], 'Troubled Waters': ['meadow', 'rock'], 'The Crater': ['sand', 'rock'],
+  'Archipelago': ['meadow', 'rock'], 'Fortress': ['stone', 'pillar'], 'Ditch Day': ['meadow', 'bush'],
+  'Puddle Jumpers': ['meadow', 'rock', 'bush'], 'The Colosseum': ['stone', 'pillar'], 'Spiral': ['sand', 'rock'],
+  'Dunes A': ['sand', 'rock', 'barrel'], 'Rivers X': ['meadow', 'bush'], 'Ladder': ['sand', 'crate', 'barrel'],
+  'Cross Bridge Cliffs': ['stone', 'rock'], 'Shrine': ['stone', 'pillar'], 'Hedge Maze': ['forest', 'bush'],
+  'Chaos Garden': ['forest', 'bush', 'rock'], 'Dunes B': ['sand', 'rock', 'crate'], 'Lakeside': ['forest', 'bush', 'rock'],
+  'Wet Woods': ['forest', 'bush', 'rock'],
+};
+
 function build(s) {
-  const a = { name: s.name, w: W, h: H, bounds: s.bounds || r(60, 50, 840, 540), walls: s.walls || [], water: s.water || [], holes: s.holes || [], wet: (s.wet || []).slice() };
+  const m = META[s.name] || ['meadow', 'rock'], kinds = m.slice(1);
+  const a = { name: s.name, w: W, h: H, theme: m[0], bounds: s.bounds || r(60, 50, 840, 540), walls: (s.walls || []).map((q, i) => ({ x: q.x, y: q.y, w: q.w, h: q.h, k: s.mix ? kinds[i % kinds.length] : kinds[0] })), water: s.water || [], holes: s.holes || [], wet: (s.wet || []).slice(), puddles: (s.wet || []).slice() };
+  a.kinds = [...new Set(a.walls.map(q => q.k))];
   for (const q of a.water) a.wet.push(r(q.x - 26, q.y - 26, q.w + 52, q.h + 52));
   a.spawns = [];
   for (let k = 0; k < 6; k++) {
@@ -112,6 +133,6 @@ function build(s) {
   return a;
 }
 
-const api = { W, H, list: specs.map(build), freeAt, circleRect };
+const api = { W, H, KINDS, list: specs.map(build), freeAt, circleRect };
 if (typeof module === 'object' && module.exports) module.exports = api; else root.MGArenas = api;
 })(typeof self !== 'undefined' ? self : globalThis);

@@ -44,6 +44,23 @@ WebSocket upgrades (the client uses `wss://` automatically on https pages). Ngin
 - **Gravestones**: a defeated gum leaves a gravestone in its colour for the rest of the round, on the nearest solid ground
   if it fell into water, a pit or out of bounds.
 
+## Game modes, maps and obstacles
+
+- **Scoring modes**: *Last one standing*, *Point per kill*, and **Golden Boomerang**. In Golden Boomerang a golden boomerang
+  lies in the arena; walk over it to pick it up. Hold it for **14 seconds in total** (the time adds up, it does not
+  have to be in one go) to win the round. While you carry it you have a golden circle under you that fills as time
+  passes, plus a golden glow, so everyone knows who has it, and your boomerang power-ups (explosive, multi, fire, ice,
+  telekinesis, teleport) are switched off. If you are defeated it drops where you fell. Nobody is eliminated for good:
+  a defeated gum respawns at a random spot inside the play area after 3 seconds (without its power-ups), and the
+  arena does not shrink in this mode. "Points to win" counts rounds.
+- **Maps in rotation**: the lobby/single-player setup shows all maps with a preview; tick the ones you want
+  (**Select all** / **Deselect all** buttons). Each round uses a random ticked map (never the same twice in a row).
+  Ticking nothing means every map.
+- **Obstacles**: maps are built from rocks, crates, hedges/bushes, barrels and stone pillars (each map has its own
+  look: meadow, sand, stone courtyard or forest). The Disguise power-up turns you into one of the obstacle types used on the
+  current map, so you blend in.
+- **Fire and Ice boomerangs never hurt the player who threw them** (for example when it flies back through its own trail).
+
 ## Controls
 
 | Action | Keys |
@@ -58,7 +75,7 @@ WebSocket upgrades (the client uses `wss://` automatically on https pages). Ngin
 
 ## Options (single-player and lobby)
 
-Arena (37 arenas, or random), scoring (last one standing / point per kill), points to win,
+Maps in rotation (37 arenas), scoring (last one standing / point per kill / golden boomerang), points to win,
 blue-book spawn rate (off/slow/normal/fast), boomerang wall bounce (on/off), losers start with a shield, AI skill, number of bots.
 
 ## Layout

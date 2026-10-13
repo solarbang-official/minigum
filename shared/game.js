@@ -12,6 +12,7 @@ const SLASH_T = 0.22;
 const DT = 1 / 60;                          // fixed simulation step: server, offline single-player and client prediction all use it
 const BOUNCE_MAX = 3, BOUNCE_SPEED = 0.5;   // a boomerang can bounce off walls 3 times, losing half its speed each time, then stops at the next wall
 
+const GOLD_TIME = 14, RESPAWN_TIME = 3, GOLD_OFF = ['explosive', 'multi', 'fire', 'ice', 'telekinesis', 'teleport'];   // golden boomerang mode: hold it 14 s (total) to win; boomerang power-ups are off while you carry it
 const B_SPEEDS = { slow: 380, normal: 520, fast: 700, insane: 900 };
 
 const PU_IDS = ['caffeinated', 'dashwall', 'teleport', 'explosive', 'multi', 'extra', 'fire', 'ice', 'disguise', 'shield', 'battleroyale', 'telekinesis', 'decoy', 'bamboozled'];
@@ -49,8 +50,12 @@ const BOT_NAMES = ['Gumbo', 'Bubbles', 'Fin', 'Chomp', 'Nibbles', 'Splash', 'Mar
 
 function sanitizeSettings(s) {
   s = s || {}; const o = {};
-  o.arena = (s.arena === 'random' || (Number.isInteger(s.arena) && s.arena >= 0 && s.arena < A.list.length)) ? s.arena : 'random';
-  o.mode = s.mode === 'kill' ? 'kill' : 'last';
+  const all = A.list.map((_, i) => i);
+  if (Array.isArray(s.arenas)) o.arenas = [...new Set(s.arenas.map(Number).filter(i => Number.isInteger(i) && i >= 0 && i < A.list.length))].sort((a, b) => a - b);
+  else if (Number.isInteger(s.arena) && s.arena >= 0 && s.arena < A.list.length) o.arenas = [s.arena];   // older single-map setting
+  else o.arenas = all;
+  if (o.arenas.length === 0) o.arenas = all;   // nothing ticked = every map
+  o.mode = ['kill', 'golden'].includes(s.mode) ? s.mode : 'last';
   o.target = clamp(parseInt(s.target) || 5, 1, 25);
   o.books = ['off', 'slow', 'normal', 'fast'].includes(s.books) ? s.books : 'normal';
   o.boomSpeed = ['slow', 'normal', 'fast', 'insane'].includes(s.boomSpeed) ? s.boomSpeed : 'normal';
@@ -129,6 +134,7 @@ class Round {
     this.bounds = Object.assign({}, a.bounds); this.target = null;
     this.time = 0; this.lastSD = 60; this.events = []; this.over = false; this.winner = null;
     this.hazards = []; this.books = []; this.decoys = []; this.dcN = 0; this.bookT = 2.5;
+    this.golden = set.mode === 'golden'; this.gold = null;
     const order = [0, 1, 2, 3, 4, 5].sort(() => Math.random() - 0.5);
     const maxS = Math.max(0, ...infos.map(i => scores[i.id] || 0));
 
@@ -138,7 +144,7 @@ class Round {
       const p = { id: inf.id, idx: i, name: inf.name, bot: !!inf.bot, variant: inf.variant, x: sp[0], y: sp[1], vx: 0, vy: 0,
         aim: Math.atan2(320 - sp[1], 480 - sp[0]), alive: true, pu: carryPUs, boom: [], invuln: 0, dashT: 0, dashCd: 0, ddx: 0, ddy: 0,
         slash: 0, slashCd: 0, burn: 0, burner: null, iceT: 0, frozen: false, fz: 0, iceImm: 0, onIce: false, bam: 0, still: 0, disg: -1,
-        oob: 0, tk: false, tkx: 0, tky: 0, cause: null, ai: null, idle: 0,
+        oob: 0, tk: false, tkx: 0, tky: 0, cause: null, ai: null, idle: 0, gold: false, goldT: 0, rt: 0,
         input: { mx: 0, my: 0, aim: 0, dh: false, t: false, m: false, d: false, r: false } };
       p.input.aim = p.aim;
       p.boom.push(newB(p));
@@ -146,6 +152,8 @@ class Round {
       if (p.pu.includes('extra') && p.boom.length < 2) p.boom.push(newB(p));
       return p;
     });
+
+    if (this.golden) { const sp = this.freeSpot(480, 320); this.gold = { x: sp[0], y: sp[1], holder: null }; }
 
     for (const p of this.players) {
       if (p.pu.length > 0) {
@@ -157,7 +165,7 @@ class Round {
   }
 
   ev(...a) { this.events.push(a); }
-  has(p, id) { return p.pu.includes(id); }
+  has(p, id) { return p.pu.includes(id) && !(p.gold && GOLD_OFF.includes(id)); }
 
   wallHit(x, y, r) { return wallHitA(this.arena, x, y, r); }
   deadly(x, y) {
@@ -198,9 +206,48 @@ class Round {
     }
     p.gx = p.x; p.gy = p.y;
   }
+  // nearest open ground to (x, y), inside the play area
+  freeSpot(x, y) {
+    const ok = (px, py) => A.freeAt(this.arena, px, py, 20, this.bounds) && !this.deadlyR(px, py, 20);
+    if (ok(x, y)) return [x, y];
+    for (let d = 10; d < 700; d += 10) for (let j = 0; j < 16; j++) {
+      const px = x + Math.cos(j * Math.PI / 8) * d, py = y + Math.sin(j * Math.PI / 8) * d;
+      if (ok(px, py)) return [px, py];
+    }
+    return [480, 320];
+  }
+  // golden boomerang mode: a defeated gum comes back at a random spot after a few seconds
+  respawn(p) {
+    let spot = null;
+    for (let tries = 0; tries < 80 && !spot; tries++) {
+      const b = this.bounds, x = b.x + 30 + Math.random() * (b.w - 60), y = b.y + 30 + Math.random() * (b.h - 60);
+      if (!A.freeAt(this.arena, x, y, 20, b) || this.deadlyR(x, y, 22)) continue;
+      const far = tries < 50 ? 150 : 60;   // prefer a spot away from everyone, but don't insist
+      if (this.players.some(q => q !== p && q.alive && Math.hypot(q.x - x, q.y - y) < far)) continue;
+      spot = [x, y];
+    }
+    if (!spot) spot = this.freeSpot(this.bounds.x + this.bounds.w / 2, this.bounds.y + this.bounds.h / 2);
+    Object.assign(p, { alive: true, x: spot[0], y: spot[1], vx: 0, vy: 0, invuln: 1.5, burn: 0, burner: null, frozen: false, fz: 0, iceT: 0, iceImm: 0, onIce: false,
+      dashT: 0, dashCd: 0, slash: 0, slashCd: 0, bam: 0, still: 0, disg: -1, oob: 0, tk: false, cause: null, gold: false, rt: 0, pu: [], boom: [] });
+    p.boom.push(newB(p)); delete p.gx; delete p.gy;
+    this.ev('resp', p.x, p.y);
+  }
+  stepGold(dt) {
+    const g = this.gold; if (!g || this.over) return;
+    if (!g.holder) {
+      for (const p of this.players) if (p.alive && Math.hypot(p.x - g.x, p.y - g.y) < 26) { g.holder = p; p.gold = true; p.disg = -1; this.ev('gold', p.x, p.y); break; }
+    } else if (g.holder.alive) {
+      const h = g.holder; h.goldT += dt;
+      if (h.goldT >= GOLD_TIME) { h.goldT = GOLD_TIME; this.over = true; this.winner = h; }
+    }
+  }
   kill(p, by, cause) {
     p.alive = false; p.cause = cause; p.burn = 0; p.frozen = false;
     this.placeGrave(p);
+    if (this.golden) {
+      p.rt = RESPAWN_TIME;
+      if (p.gold) { p.gold = false; const g = this.gold; g.holder = null; const sp = this.freeSpot(p.gx, p.gy); g.x = sp[0]; g.y = sp[1]; this.ev('gdrop', g.x, g.y); }
+    }
     this.ev('die', p.x, p.y, cause === 'drop' || cause === 'oob' ? 1 : 0);
     for (const b of p.boom) if (b.s !== 'held') { b.s = 'drop'; b.vx = b.vy = 0; b.fuse = -1; b.dfl = null; }
     if (by && by !== p && cause !== 'drop' && cause !== 'oob' && !this.over && this.set.mode === 'kill') this.scores[by.id] = (this.scores[by.id] || 0) + 1;
@@ -339,7 +386,7 @@ class Round {
       dashing = p.dashT > 0;
       if (tk) { p.tkx = mx; p.tky = my; }
       if (this.has(p, 'disguise') && mx === 0 && my === 0 && !dashing && !aT && !aM) {
-        p.still += dt; if (p.still >= 1 && p.disg < 0) p.disg = Math.floor(Math.random() * 4);
+        p.still += dt; if (p.still >= 1 && p.disg < 0) { const ks = this.arena.kinds.length ? this.arena.kinds : ['rock']; p.disg = A.KINDS.indexOf(ks[Math.floor(Math.random() * ks.length)]); }
       } else { p.still = 0; p.disg = -1; }
       const sp = SPEED * (this.has(p, 'caffeinated') ? 1.45 : 1) * (p.onIce ? 0.5 : 1);
       if (dashing) { vx = p.ddx * DASH_SP; vy = p.ddy * DASH_SP; p.dashT -= dt; }
@@ -371,6 +418,7 @@ class Round {
       p.onIce = false;
       for (const h of this.hazards) {
         if (Math.hypot(h.x - p.x, h.y - p.y) > 17) continue;
+        if (h.owner === p) continue;   // your own fire and ice never hurt you (e.g. when your boomerang flies back through its trail)
         if (h.type === 0) { if (p.burn <= 0 && !this.wetAt(p.x, p.y)) { p.burn = 4; p.burner = h.owner; this.ev('burn', p.x, p.y); } }
         else p.onIce = true;
       }
@@ -382,7 +430,7 @@ class Round {
     for (const p of this.players) {
       if (!p.alive || p.burn <= 0) continue;
       for (const q of this.players) {
-        if (q === p || !q.alive || q.burn > 0 || this.wetAt(q.x, q.y)) continue;
+        if (q === p || q === p.burner || !q.alive || q.burn > 0 || this.wetAt(q.x, q.y)) continue;
         if (Math.hypot(q.x - p.x, q.y - p.y) < 28) { q.burn = 4; q.burner = p.burner; this.ev('burn', q.x, q.y); }
       }
     }
@@ -496,6 +544,7 @@ class Round {
     if (ai.st <= 0) { ai.strafe *= -1; ai.st = 1 + Math.random() * 2; }
     const en = this.enemiesOf(p); let near = null, nd = 1e9;
     for (const e of en) { const d = Math.hypot(e.x - p.x, e.y - p.y); if (d < nd) { nd = d; near = e; } }
+    if (this.golden && this.gold.holder && this.gold.holder !== p && this.gold.holder.alive) { near = this.gold.holder; nd = Math.hypot(near.x - p.x, near.y - p.y); }   // everyone hunts the carrier
     const held = p.boom.some(b => b.s === 'held' && !b.temp);
     let wx = 0, wy = 0;
 
@@ -526,6 +575,7 @@ class Round {
       let bk = null, bkd = 280;
       for (const k of this.books) { const d = Math.hypot(k.x - p.x, k.y - p.y); if (d < bkd) { bkd = d; bk = k; } }
       if (bk && (!near || nd > 120)) toward(bk.x, bk.y, 1.6);
+      if (this.golden && !this.gold.holder) toward(this.gold.x, this.gold.y, 2.4);
       if (near) {
         const dx = near.x - p.x, dy = near.y - p.y, l = nd || 1;
         if (held) {
@@ -596,6 +646,7 @@ class Round {
     // A stalled client (backgrounded tab, network hiccup) must not keep running with its last held keys:
     // after 0.25s without input the player stands still.
     for (const p of this.players) if (p.alive && !p.bot && ++p.idle > 15) { p.input.mx = 0; p.input.my = 0; p.input.dh = false; }
+    if (this.golden) for (const p of this.players) if (!p.alive && p.rt > 0 && !this.over) { p.rt -= dt; if (p.rt <= 0) this.respawn(p); }
     for (const p of this.players) if (p.alive) this.stepPlayer(p, dt);
     const al = this.players.filter(p => p.alive);
     for (let i = 0; i < al.length; i++) for (let j = i + 1; j < al.length; j++) {
@@ -605,20 +656,24 @@ class Round {
     this.stepDecoys(dt);
     this.stepBooms(dt);
     this.stepHazards(dt);
+    this.stepGold(dt);
     const interval = { off: 0, slow: 12, normal: 7, fast: 3.5 }[this.set.books];
     if (interval > 0) { this.bookT -= dt; if (this.bookT <= 0) { if (this.books.length < 5) this.spawnBook(); this.bookT = interval; } }
     for (let i = this.books.length - 1; i >= 0; i--) {
       const k = this.books[i];
       for (const p of this.players) if (p.alive && Math.hypot(p.x - k.x, p.y - k.y) < 24) { this.givePU(p, this.pickRandomPU(p)); this.ev('pk', k.x, k.y); this.books.splice(i, 1); break; }
     }
-    if (this.time > 75 && this.time - this.lastSD > 12) { this.lastSD = this.time; const b = this.target || this.bounds; this.shrink(b.x + b.w / 2, b.y + b.h / 2, 0.7); }
+    if (!this.golden && this.time > 75 && this.time - this.lastSD > 12) { this.lastSD = this.time; const b = this.target || this.bounds; this.shrink(b.x + b.w / 2, b.y + b.h / 2, 0.7); }
     if (this.target) {
       const b = this.bounds, t = this.target, s = 70 * dt;
       const mv = (c, to) => c < to ? Math.min(to, c + s) : Math.max(to, c - s);
       const l = mv(b.x, t.x), tp = mv(b.y, t.y), rr = mv(b.x + b.w, t.x + t.w), bt = mv(b.y + b.h, t.y + t.h);
       b.x = l; b.y = tp; b.w = rr - l; b.h = bt - tp;
     }
-    if (!this.over && this.players.length >= 2) {
+    if (!this.over && this.golden && this.time > 210) {   // nobody got there: whoever held it longest wins
+      this.over = true; let best = null; for (const p of this.players) if (p.goldT > 0 && (!best || p.goldT > best.goldT)) best = p; this.winner = best;
+    }
+    if (!this.over && !this.golden && this.players.length >= 2) {
       const alive = this.players.filter(p => p.alive);
       if (alive.length <= 1) { this.over = true; this.winner = alive[0] || null; }
       else if (this.time > 150) { this.over = true; this.winner = null; }
@@ -633,6 +688,7 @@ class Round {
         dh: p.dashT > 0 ? 1 : 0, sl: p.slash > 0 ? +(p.slash / SLASH_T).toFixed(2) : 0, bm: p.bam > 0 ? 1 : 0, oo: +(p.oob / 3).toFixed(2),
         iv: p.invuln > 0 ? 1 : 0, pu: p.pu, hd: p.boom.filter(b => b.s === 'held' && !b.temp).length, tk: p.tk ? 1 : 0, cd: +p.dashCd.toFixed(3) };
       // what the owning client needs to keep predicting its own movement from this snapshot
+      if (this.golden) { e.gt = +p.goldT.toFixed(1); if (p.gold) e.gh = 1; if (!p.alive) e.rt = +Math.max(0, p.rt).toFixed(1); }
       if (!p.alive && p.gx !== undefined) { e.gx = rnd(p.gx); e.gy = rnd(p.gy); }   // gravestone spot
       if (p.onIce) e.ic = 1;
       if (p.dashT > 0) { e.dtm = +p.dashT.toFixed(4); e.dd = [+p.ddx.toFixed(4), +p.ddy.toFixed(4)]; }
@@ -642,8 +698,10 @@ class Round {
     const bo = [];
     this.players.forEach((p, i) => { for (const b of p.boom) if (b.s !== 'held') bo.push([rnd(b.x), rnd(b.y), b.s === 'fly' ? 0 : b.s === 'ret' ? 1 : 2, i, Math.round(b.vx), Math.round(b.vy), b.temp ? 1 : 0, b.fuse > 0 ? 1 : 0]); });
     const ev = this.events; this.events = [];
-    return { ar: this.idx, bd: [Math.round(this.bounds.x), Math.round(this.bounds.y), Math.round(this.bounds.w), Math.round(this.bounds.h)],
+    const out = { ar: this.idx, bd: [Math.round(this.bounds.x), Math.round(this.bounds.y), Math.round(this.bounds.w), Math.round(this.bounds.h)],
       pl, bo, hz: this.hazards.map(h => [Math.round(h.x), Math.round(h.y), h.type, +h.t.toFixed(1)]), bk: this.books.map(k => [Math.round(k.x), Math.round(k.y)]), ev };
+    if (this.golden) { out.gm = GOLD_TIME; if (!this.gold.holder) out.gb = [Math.round(this.gold.x), Math.round(this.gold.y)]; }
+    return out;
   }
 }
 
@@ -658,8 +716,8 @@ class Match {
   }
   startRound() {
     this.round++;
-    let idx = this.set.arena;
-    if (idx === 'random') { do { idx = Math.floor(Math.random() * A.list.length); } while (idx === this.lastArena && A.list.length > 1); }
+    const pool = this.set.arenas;   // the maps the host ticked: a random one each round, never the same twice in a row
+    let idx; do { idx = pool[Math.floor(Math.random() * pool.length)]; } while (idx === this.lastArena && pool.length > 1);
     this.lastArena = idx;
     this.game = new Round(idx, this.infos, this.scores, this.set, this.playerPUs);
     this.phase = 'countdown'; this.t = 3; this.winnerId = null;
@@ -687,7 +745,7 @@ class Match {
       if (g.over) {
         this.phase = 'over'; this.t = 3.2;
         this.winnerId = g.winner ? g.winner.id : null;
-        if (this.set.mode === 'last' && g.winner) this.scores[g.winner.id]++;
+        if ((this.set.mode === 'last' || this.set.mode === 'golden') && g.winner) this.scores[g.winner.id]++;
         for (const p of g.players) {
           this.playerPUs[p.id] = p.pu.slice();
         }
@@ -712,6 +770,6 @@ class Match {
   }
 }
 
-const api = { Match, Round, VARIANTS, PU_INFO, PU_IDS, BOT_NAMES, B_SPEEDS, DT, BOUNCE_MAX, BOUNCE_SPEED, sanitizeSettings, fillBots, predictStep };
+const api = { GOLD_TIME, RESPAWN_TIME, Match, Round, VARIANTS, PU_INFO, PU_IDS, BOT_NAMES, B_SPEEDS, DT, BOUNCE_MAX, BOUNCE_SPEED, sanitizeSettings, fillBots, predictStep };
 if (typeof module === 'object' && module.exports) module.exports = api; else root.MGGame = api;
 })(typeof self !== 'undefined' ? self : globalThis);
