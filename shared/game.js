@@ -464,7 +464,7 @@ class Round {
     b.vx = Math.cos(a) * sp; b.vy = Math.sin(a) * sp;
   }
 
-  stepBooms(dt) {
+stepBooms(dt) {
     for (const p of this.players) {
       for (const b of p.boom.slice()) {
         if (b.s === 'held') continue;
@@ -521,38 +521,45 @@ class Round {
           const dx = p.x - b.x, dy = p.y - b.y, d = Math.hypot(dx, dy);
           if (d < 20) { this.catchB(p, b); continue; }
           
-          // Desired recall velocity directly toward player
           const k = Math.min(1, 8 * dt);
-          const targetVx = (dx / d) * B_RET, targetVy = (dy / d) * B_RET;
-          b.vx += (targetVx - b.vx) * k;
-          b.vy += (targetVy - b.vy) * k;
-          
+          b.vx += ((dx / d) * B_RET - b.vx) * k;
+          b.vy += ((dy / d) * B_RET - b.vy) * k;
           let nx = b.x + b.vx * dt, ny = b.y + b.vy * dt;
 
-          // Maneuver if direct recall path hits a wall
+          // When blocked by a wall during return, apply a slow perpendicular drift
           if (this.wallHit(nx, ny, B_R)) {
-            const targetAng = Math.atan2(dy, dx);
-            let foundAng = null;
-            const manSpeed = B_RET * 0.45; // Move slowly while maneuvering around corner openings
-            const stepAngles = [0.35, -0.35, 0.7, -0.7, 1.05, -1.05, 1.4, -1.4, 1.75, -1.75, 2.1, -2.1];
-            for (const offset of stepAngles) {
-              const testAng = targetAng + offset;
-              const testVx = Math.cos(testAng) * manSpeed;
-              const testVy = Math.sin(testAng) * manSpeed;
-              const tx = b.x + testVx * dt;
-              const ty = b.y + testVy * dt;
-              if (!this.wallHit(tx, ty, B_R)) {
-                foundAng = testAng;
-                b.vx = testVx;
-                b.vy = testVy;
-                nx = tx;
-                ny = ty;
-                break;
+            const dirX = dx / d, dirY = dy / d;
+            const perpX1 = -dirY, perpY1 = dirX;
+            const perpX2 = dirY, perpY2 = -dirX;
+            
+            // Gentle shift speed (~100 px/s instead of fast ~620 px/s)
+            const driftSpeed = 100;
+            const t1x = b.x + perpX1 * driftSpeed * dt, t1y = b.y + perpY1 * driftSpeed * dt;
+            const t2x = b.x + perpX2 * driftSpeed * dt, t2y = b.y + perpY2 * driftSpeed * dt;
+
+            const hit1 = this.wallHit(t1x, t1y, B_R);
+            const hit2 = this.wallHit(t2x, t2y, B_R);
+
+            if (!hit1 || !hit2) {
+              let chooseFirst = !hit1;
+              if (!hit1 && !hit2) {
+                const dist1 = Math.hypot(p.x - t1x, p.y - t1y);
+                const dist2 = Math.hypot(p.x - t2x, p.y - t2y);
+                chooseFirst = dist1 <= dist2;
               }
+              const px = chooseFirst ? perpX1 : perpX2;
+              const py = chooseFirst ? perpY1 : perpY2;
+              
+              b.vx = px * driftSpeed;
+              b.vy = py * driftSpeed;
+              nx = b.x + b.vx * dt;
+              ny = b.y + b.vy * dt;
+            } else {
+              this.waitB(b);
+              continue;
             }
-            if (foundAng === null) { this.waitB(b); continue; }
           }
-          
+
           this.trail(p, b, nx, ny); b.x = nx; b.y = ny;
         }
         if (b.s === 'fly' || b.s === 'ret') {
