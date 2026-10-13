@@ -221,7 +221,7 @@ class Round {
   shrink(cx, cy, f) {
     const b = this.bounds, t = this.target || b;
     const nw = Math.max(260, t.w * f), nh = Math.max(180, t.h * f);
-    this.target = { x: clamp(cx - nw / 2, b.x, b.x + b.w - nw), y: clamp(cy - nh / 2, b.y, b.y + b.h - nh)};
+    this.target = { x: clamp(cx - nw / 2, b.x, b.x + b.w - nw), y: clamp(cy - nh / 2, b.y, b.y + b.h - nh), w: nw, h: nh };
     this.ev('br');
   }
   givePU(p, id) {
