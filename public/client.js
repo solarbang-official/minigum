@@ -12,12 +12,15 @@ const fishImgs = V.map((v, i) => { const im = new Image(); im.src = fishSrc(i); 
 let curSet = {};   // settings of the match being played
 let wantSpec = localStorage.mgSpec === '1';
 let myName = localStorage.mgName || '', myVar = +localStorage.mgVar || 0;
-let spSettings = Object.assign({ arenas: A.list.map((_, i) => i), mode: 'last', target: 5, books: 'normal', boomSpeed: 'normal', bounce: true, pullBack: false, homing: false, goldThrow: false, puCarry: false, hideTime: 60, hideUses: 12, hideWins: 3, underdog: false, ai: 1, bots: 3, pus: G.PU_IDS ? G.PU_IDS.slice() : [] }, safeParse(localStorage.mgSP));
+let spSettings = Object.assign({ arenas: A.list.map((_, i) => i), mode: 'last', target: 5, books: 'normal', boomSpeed: 'normal', bounce: true, pullBack: false, homing: false, goldThrow: false, puCarry: false, hideTime: 60, hideUses: 12, hideWins: 7, ballSize: 2, ballGoals: 3, ballTime: 360, underdog: false, ai: 1, bots: 3, pus: G.PU_IDS ? G.PU_IDS.slice() : [] }, safeParse(localStorage.mgSP));
 try { if (!localStorage.mgMapsV8 && Array.isArray(spSettings.arenas)) { for (let i = 0; i < A.list.length; i++) if (A.list[i].hs === 'only' && !spSettings.arenas.includes(i)) spSettings.arenas.push(i); localStorage.mgMapsV8 = '1'; } } catch (e) {}   // new hide & seek maps start ticked
 function safeParse(s) { try { return JSON.parse(s) || {}; } catch (e) { return {}; } }
+try { if (!localStorage.mgHideWins7) { spSettings.hideWins = 7; localStorage.mgHideWins7 = '1'; } } catch (e) {}   // the Hide & Seek win target now defaults to 7
 let mode = 'menu';
 let ws = null, myId = null, room = null;
-let match = null, infos = [], names = {}, varOf = {};
+let match = null, infos = [], names = {}, varOf = {}, teamOf = {};
+const TEAM = [{ n: 'Blue', c: '#3d8bff', d: '#173f80' }, { n: 'Red', c: '#ff4d4d', d: '#7a1414' }];
+let goalInfo = null, ballRot = 0, ballLast = 0;
 let lastSnap = null, lastSnapAt = 0;
 let announcements = [];
 
@@ -115,21 +118,25 @@ function formHTML(botsLabel, botsMin) {
   return `<div class="pu-header">\u{1F5FA}\uFE0F Maps in rotation <span class="mapcount" data-mapcount></span></div>
   <div class="row maprow"><button type="button" class="sec small" data-mapsel="all">Select all</button><button type="button" class="sec small" data-mapsel="none">Deselect all</button></div>
   <div class="map-grid">${arenas.map((a, i) => `<label class="map-card" title="${a.name}${a.hs === 'only' ? ' (Hide &amp; Seek only)' : a.hs ? ' (also in Hide &amp; Seek)' : ''}"><input type="checkbox" data-map="${i}"><canvas width="132" height="88" data-thumb="${i}"></canvas><span>${i + 1}. ${a.name}${a.hs === 'only' ? ' \u{1F648}' : ''}</span></label>`).join('')}</div>
-  <label class="field-label">Scoring <select data-k="mode"><option value="last">👑 Last one standing</option><option value="kill">⚔️ Point per kill</option><option value="golden">\u{1F3C6} Golden Boomerang (hold it 14s)</option><option value="hide">\u{1F648} Hide &amp; Seek</option></select></label>
-  <label class="field-label" data-nomode="hide"><span data-targetlabel>Rounds to win</span> <input data-k="target" type="number" min="1" max="25"></label>
+  <label class="field-label">Scoring <select data-k="mode"><option value="last">👑 Last one standing</option><option value="kill">⚔️ Point per kill</option><option value="golden">\u{1F3C6} Golden Boomerang (hold it 14s)</option><option value="hide">\u{1F648} Hide &amp; Seek</option><option value="ball">\u26BD Boomerang Ball</option></select></label>
+  <label class="field-label" data-nomode="hide ball"><span data-targetlabel>Rounds to win</span> <input data-k="target" type="number" min="1" max="25"></label>
   <label class="field-label" data-mode="hide" title="Round wins needed to win the match. A round win = the seeker finds everyone, or a hider stays hidden until time runs out. If several players reach it in the same round, they play a sudden-death Battle Royale and everyone else spectates.">Wins needed to win the match <input data-k="hideWins" type="number" min="1" max="25"></label>
   <label class="field-label" data-mode="hide" title="How long the hiders must stay hidden for the hiders to win the round.">Hiders win after (seconds) <input data-k="hideTime" type="number" min="10" max="600"></label>
   <label class="field-label" data-mode="hide" title="How many swings and throws the seeker gets. Finding a hider gives back 3. 0 = no limit.">Seeker melee + throw limit (0 = unlimited) <input data-k="hideUses" type="number" min="0" max="99"></label>
+  <label class="field-label" data-mode="ball" title="Goals that win the match. 0 means no goal limit: whoever leads when the clock runs out wins.">Goals to win (0 = play to the clock) <input data-k="ballGoals" type="number" min="0" max="25"></label>
+  <label class="field-label" data-mode="ball" title="If the score is level when time is up, the next goal wins.">Match length <select data-k="ballTime"><option value="60">1 minute</option><option value="120">2 minutes</option><option value="240">4 minutes</option><option value="360">6 minutes</option></select></label>
+  <label class="field-label" data-mode="ball" title="Bots fill empty spots so both teams are always the same size.">Players per team <select data-k="ballSize"><option value="0">Just enough (bots even it up)</option><option value="1">1 v 1</option><option value="2">2 v 2</option><option value="3">3 v 3</option></select></label>
+  <label class="field-label" data-mode="ball" data-lobonly="1">Teams are picked by <select data-k="teamSel"><option value="players">The players</option><option value="host">The host</option></select></label>
   <label class="field-label" data-nomode="hide">Blue book spawn <select data-k="books"><option value="off">Off</option><option value="slow">Slow</option><option value="normal">Normal</option><option value="fast">Fast</option></select></label>
   <label class="field-label">Boomerang Speed <select data-k="boomSpeed"><option value="slow">Slow</option><option value="normal">Normal</option><option value="fast">Fast</option><option value="insane">Insane</option></select></label>
   <label class="field-label">Boomerangs bounce off walls <input data-k="bounce" type="checkbox"></label>
   <label class="field-label" title="Hold the throw button to pull your boomerangs back. Off: walk over them to pick them up.">Pull back (hold throw to recall) <input data-k="pullBack" type="checkbox"></label>
   <label class="field-label" title="Thrown boomerangs arc slightly towards enemy players.">Homing boomerangs <input data-k="homing" type="checkbox"></label>
   <label class="field-label" data-mode="golden" title="Golden Boomerang mode: off means the holder can only use melee.">Golden holder can throw it <input data-k="goldThrow" type="checkbox"></label>
-  <label class="field-label" data-nomode="hide" title="Keep your power-ups when the next round starts.">Power-ups carry over between rounds <input data-k="puCarry" type="checkbox"></label>
-  <label class="field-label" data-nomode="hide">Losers start with shield <input data-k="underdog" type="checkbox"></label>
+  <label class="field-label" data-nomode="hide ball" title="Keep your power-ups when the next round starts.">Power-ups carry over between rounds <input data-k="puCarry" type="checkbox"></label>
+  <label class="field-label" data-nomode="hide ball">Losers start with shield <input data-k="underdog" type="checkbox"></label>
   <label class="field-label">AI skill <select data-k="ai"><option value="0">Easy</option><option value="1">Normal</option><option value="2">Hard</option></select></label>
-  <label class="field-label">${botsLabel} <input data-k="bots" type="number" min="${botsMin}" max="5"></label>
+  <label class="field-label" data-nomode="ball">${botsLabel} <input data-k="bots" type="number" min="${botsMin}" max="5"></label>
   <div class="pu-header">⚡ Enabled Powerups</div>
   <div class="pu-grid">
     ${puIds.map(id => `<label class="pu-chip"><input type="checkbox" data-pu="${id}"> <span>${puInfo[id] ? puInfo[id].n : id}</span></label>`).join('')}
@@ -156,8 +163,8 @@ function wireMapPicker(el) {
 }
 // options that belong to one scoring mode only show while that mode is selected
 function syncModeOptions(el, mode) {
-  for (const e of el.querySelectorAll('[data-mode]')) e.classList.toggle('hidden', e.dataset.mode !== mode);
-  for (const e of el.querySelectorAll('[data-nomode]')) e.classList.toggle('hidden', e.dataset.nomode === mode);
+  for (const e of el.querySelectorAll('[data-mode]')) e.classList.toggle('hidden', !e.dataset.mode.split(' ').includes(mode));
+  for (const e of el.querySelectorAll('[data-nomode]')) e.classList.toggle('hidden', e.dataset.nomode.split(' ').includes(mode));
   for (const cb of el.querySelectorAll('[data-map]')) cb.closest('.map-card').classList.toggle('hidden', !(A.usable ? A.usable(+cb.dataset.map, mode) : true));   // hide & seek has its own maps
   updateMapCount(el);
   const t = el.querySelector('[data-targetlabel]'); if (t) t.textContent = mode === 'kill' ? 'Kills to win' : 'Rounds to win';
@@ -191,19 +198,21 @@ function readForm(el) {
 
 if ($('#spForm')) $('#spForm').innerHTML = formHTML('Opponents', 1);
 if ($('#lobForm')) $('#lobForm').innerHTML = formHTML('Bots (fills empty slots)', 0);
+if ($('#spForm')) for (const e of $('#spForm').querySelectorAll('[data-lobonly]')) e.remove();   // online-only options
 wireMapPicker($('#spForm')); wireMapPicker($('#lobForm'));
 if ($('#btnSP')) $('#btnSP').onclick = () => { fillForm($('#spForm'), spSettings); show('setup'); };
 if ($('#spBack')) $('#spBack').onclick = () => show('menu');
 if ($('#spStart')) $('#spStart').onclick = () => {
   spSettings = readForm($('#spForm')); if (spSettings.bots < 1) spSettings.bots = 1;
   localStorage.mgSP = JSON.stringify(spSettings);
-  const humans = [{ id: 'me', name: (myName || 'You').slice(0, 14), variant: myVar }];
-  startGame('sp', G.fillBots(humans, spSettings.bots), spSettings, new G.Match(spSettings, G.fillBots(humans, spSettings.bots)));
+  const humans = [{ id: 'me', name: (myName || 'You').slice(0, 14), variant: myVar, team: 0 }];
+  const inf = spSettings.mode === 'ball' ? G.fillTeams(humans, spSettings.ballSize || 2) : G.fillBots(humans, spSettings.bots);
+  startGame('sp', inf, spSettings, new G.Match(spSettings, inf));
 };
 
 function startGame(m, inf, set, mt) {
-  curSet = set || {}; mode = m; infos = inf; names = {}; varOf = {}; announcements = [];
-  for (const i of inf) { names[i.id] = i.name; varOf[i.id] = i.variant; }
+  curSet = set || {}; mode = m; infos = inf; names = {}; varOf = {}; teamOf = {}; announcements = []; goalInfo = null;
+  for (const i of inf) { names[i.id] = i.name; varOf[i.id] = i.variant; if (i.team === 0 || i.team === 1) teamOf[i.id] = i.team; }
   closeSettings(); setPause(false); releaseInput();
   match = mt; lastSnap = null; myId = m === 'sp' ? 'me' : myId; show(null); if ($('#leave')) $('#leave').classList.remove('hidden'); hintT = performance.now();
   netReset(); if (m === 'mp') wsSend({ t: 'ping', c: performance.now() });
@@ -276,14 +285,29 @@ if ($('#joinCode')) {
   $('#joinCode').addEventListener('keydown', e => { if (e.key === 'Enter' && $('#btnJoin')) $('#btnJoin').click(); });
 }
 
+if ($('#plist')) $('#plist').addEventListener('click', e => {
+  const b = e.target.closest ? e.target.closest('[data-team],[data-shuffle]') : null; if (!b) return;
+  if (b.dataset.shuffle !== undefined) wsSend({ t: 'shuffle' }); else wsSend({ t: 'team', id: b.dataset.pid, team: +b.dataset.team });
+});
 if ($('#lobForm')) $('#lobForm').addEventListener('change', () => { if (room && room.hostId === myId) wsSend({ t: 'settings', settings: readForm($('#lobForm')) }); });
 
 function renderLobby() {
   if ($('#lobCode')) $('#lobCode').textContent = room.code;
   const tag = p => `${esc(p.name)}${p.id === myId ? ' (you)' : ''}${p.id === room.hostId ? ' ★' : ''}`;
   const plrs = room.players.filter(p => !p.spec), specs = room.players.filter(p => p.spec);
-  if ($('#plist')) $('#plist').innerHTML = plrs.map(p => `<div><img src="${fishSrc(p.variant)}"><span>${tag(p)}</span></div>`).join('') +
-    specs.map(p => `<div style="opacity:.7"><span style="font-size:22px">\u{1F441}\uFE0F</span><span>${tag(p)} <em style="color:var(--muted);font-size:14px">spectating</em></span></div>`).join('');
+  const ballMode = !!(room.settings && room.settings.mode === 'ball'), hostNow = room.hostId === myId;
+  const specRows = specs.map(p => `<div style="opacity:.7"><span style="font-size:22px">\u{1F441}\uFE0F</span><span>${tag(p)} <em style="color:var(--muted);font-size:14px">spectating</em></span></div>`).join('');
+  if ($('#plist')) {
+    if (!ballMode) $('#plist').innerHTML = plrs.map(p => `<div><img src="${fishSrc(p.variant)}"><span>${tag(p)}</span></div>`).join('') + specRows;
+    else {   // boomerang ball: players sorted into two teams
+      const pick = p => (hostNow || (p.id === myId && room.settings.teamSel === 'players')) ? `<span style="margin-left:auto;display:flex;gap:6px"><button type="button" class="sec small" data-team="0" data-pid="${p.id}" title="Blue team" style="padding:2px 10px">\u{1F535}</button><button type="button" class="sec small" data-team="1" data-pid="${p.id}" title="Red team" style="padding:2px 10px">\u{1F534}</button></span>` : '';
+      const grp = (title, col, list) => `<div style="background:none;border:none;padding:4px 2px 0;font-size:15px;font-weight:700;color:${col}">${title}</div>` + (list.length ? list.map(p => `<div style="border-color:${col}"><img src="${fishSrc(p.variant)}"><span>${tag(p)}</span>${pick(p)}</div>`).join('') : `<div style="opacity:.45;font-size:14px">empty \u2014 a bot will play here if needed</div>`);
+      const tm = t => plrs.filter(p => p.team === t), none = plrs.filter(p => p.team !== 0 && p.team !== 1);
+      $('#plist').innerHTML = (hostNow ? '<div style="background:none;border:none;padding:0"><button type="button" class="sec small" data-shuffle="1">\u{1F3B2} Shuffle teams</button></div>' : '') +
+        grp('\u{1F535} Blue team (' + tm(0).length + '/3)', TEAM[0].c, tm(0)) + grp('\u{1F534} Red team (' + tm(1).length + '/3)', TEAM[1].c, tm(1)) +
+        (none.length ? grp('Not picked yet (balanced at kickoff)', '#bbb', none) : '') + specRows;
+    }
+  }
   const me = room.players.find(p => p.id === myId); if (me && !me.spec) myVar = me.variant;
   const iSpec = !!(me && me.spec);
   const taken = new Set(plrs.filter(p => p.id !== myId).map(p => p.variant));
@@ -298,7 +322,7 @@ function renderLobby() {
     else for (const i of lobForm.querySelectorAll('[data-k]')) i.disabled = false;
   }
   if ($('#lobStart')) $('#lobStart').disabled = !host;
-  if ($('#lobHint')) $('#lobHint').textContent = host ? 'You are the host. Empty slots are filled with AI bots.' : 'Waiting for the host to start…';
+  if ($('#lobHint')) $('#lobHint').textContent = ballMode ? (host ? 'Boomerang Ball: bots fill empty spots so both teams are even. ' + (room.settings.teamSel === 'host' ? 'You pick the teams.' : 'Players pick their own team.') : (room.settings.teamSel === 'host' ? 'The host picks the teams.' : 'Pick your team above.') + ' Waiting for the host\u2026') : host ? 'You are the host. Empty slots are filled with AI bots.' : 'Waiting for the host to start…';
 }
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
@@ -455,7 +479,7 @@ function renderPause() {
   const html = infos.map(i => {
     const p = byId[i.id], inRound = !snap || !snap.sd || !!p, alive = p ? !!p.al : inRound, sc = snap && snap.sc ? (snap.sc[i.id] || 0) : 0;
     const host = mode === 'mp' && room && room.hostId === i.id ? ' ★' : '';
-    return `<div class="${alive ? '' : 'out'}"><img src="${fishSrc(i.variant)}"><span class="nm">${esc(i.name)}${i.id === myId ? ' (you)' : ''}${host}</span><span class="st">${alive ? '' : inRound ? 'out' : 'spectating'}</span><span class="sc">${sc}</span></div>`;
+    return `<div class="${alive ? '' : 'out'}"><img src="${fishSrc(i.variant)}"><span class="nm">${esc(i.name)}${i.id === myId ? ' (you)' : ''}${host}</span><span class="st">${alive ? '' : inRound ? 'out' : 'spectating'}</span><span class="sc">${snap && snap.bl ? (i.team === 0 ? '\u{1F535}' : '\u{1F534}') : sc}</span></div>`;
   }).join('');
   if (html !== lastPauseHtml) { lastPauseHtml = html; list.innerHTML = html; }
 }
@@ -576,6 +600,11 @@ function playEvents(evs) {
       case 'gold': fx.push({ k: 'pk', x, y, t0: now, life: 500 }); beep(660, 0.12, 'triangle', 0.07, 400); setTimeout(() => beep(990, 0.18, 'triangle', 0.06, 300), 90); break;
       case 'gdrop': fx.push({ k: 'tp', x, y, t0: now, life: 400 }); beep(420, 0.2, 'sawtooth', 0.05, -200); break;
       case 'resp': fx.push({ k: 'tp', x, y, t0: now, life: 400 }); beep(520, 0.15, 'sine', 0.05, 300); break;
+      case 'kick': fx.push({ k: 'hit', x, y, t0: now, life: 260 }); beep(330, 0.09, 'triangle', 0.06, 160); break;
+      case 'bnk': beep(200, 0.05, 'sine', 0.035, -60); break;
+      case 'goal': goalInfo = { team: e[1], name: e[2], lt: e[3], t0: now }; for (let i = 0; i < 3; i++) fx.push({ k: 'pk', x: e[1] === 0 ? 920 : 40, y: 320, t0: now, life: 500 + i * 250 }); beep(520, 0.25, 'triangle', 0.09, 300); setTimeout(() => beep(780, 0.25, 'triangle', 0.08, 300), 130); setTimeout(() => beep(1040, 0.4, 'triangle', 0.08, 200), 260); break;
+      case 'ot': announcements.push({ txt: 'OVERTIME \u2014 next goal wins!', t0: now, life: 3500 }); beep(220, 0.5, 'sawtooth', 0.07, 120); break;
+      case 'kickoff': beep(660, 0.15, 'square', 0.06, 330); break;
       case 'thud': beep(140, 0.1, 'square', 0.04); break;
       case 'dash': beep(200, 0.1, 'sine', 0.04, 300); break;
       case 'br': fx.push({ k, x: 480, y: 320, t0: now, life: 1000 }); beep(90, 0.8, 'sawtooth', 0.08, 40); break;
@@ -598,6 +627,10 @@ function rrect(g, x, y, w, h, r) { g.beginPath(); if (g.roundRect) g.roundRect(x
 function drawObstacle(g, kind, x, y, w, h, sd) {
   const R = srand(sd), cx = x + w / 2, cy = y + h / 2;
   g.save(); g.lineJoin = 'round'; g.lineCap = 'round';
+  if (kind === 'post') {   // goal posts: white with a stripe in the defending team's colour
+    g.fillStyle = '#f6f6f6'; rrect(g, x, y, w, h, 5); g.fill(); g.strokeStyle = '#8a8a8a'; g.lineWidth = 2; rrect(g, x + 1, y + 1, w - 2, h - 2, 5); g.stroke();
+    g.fillStyle = TEAM[cx < 480 ? 0 : 1].c; g.fillRect(cx < 480 ? x + w - 12 : x + 2, y + 2, 10, h - 4); g.restore(); return;
+  }
   if (kind === 'crate') {
     g.fillStyle = '#c98f4f'; rrect(g, x, y, w, h, 3); g.fill();
     g.fillStyle = '#e0ac6c'; g.fillRect(x + 2, y + 2, w - 4, Math.min(5, h / 3));
@@ -672,6 +705,30 @@ function drawFloors(g, a, R) {
     }
   }
 }
+// boomerang ball pitch: centre line and circle, penalty boxes and the two goal nets
+function drawPitch(g, a) {
+  const gl = a.goal; g.save(); g.lineCap = 'round';
+  g.strokeStyle = 'rgba(255,255,255,0.55)'; g.lineWidth = 4;
+  g.beginPath(); g.moveTo(480, 6); g.lineTo(480, 634); g.stroke(); g.beginPath(); g.arc(480, 320, 74, 0, 7); g.stroke();
+  g.beginPath(); g.arc(480, 320, 6, 0, 7); g.fillStyle = 'rgba(255,255,255,0.7)'; g.fill();
+  g.strokeRect(2, gl.y1 - 60, 150, gl.y2 - gl.y1 + 120); g.strokeRect(958 - 150, gl.y1 - 60, 150, gl.y2 - gl.y1 + 120); g.strokeRect(2, 2, 956, 636);
+  for (const t of [0, 1]) {
+    const x0 = t === 0 ? 0 : 960 - gl.depth, c = TEAM[t].c;
+    g.fillStyle = c; g.globalAlpha = 0.35; g.fillRect(x0, gl.y1, gl.depth, gl.y2 - gl.y1); g.globalAlpha = 0.8; g.strokeStyle = '#fff'; g.lineWidth = 1.5;
+    g.beginPath(); for (let y = gl.y1; y <= gl.y2; y += 12) { g.moveTo(x0, y); g.lineTo(x0 + gl.depth, y); } for (let x = x0; x <= x0 + gl.depth; x += 10) { g.moveTo(x, gl.y1); g.lineTo(x, gl.y2); } g.stroke(); g.globalAlpha = 1;
+    g.strokeStyle = c; g.lineWidth = 5; g.beginPath(); const gx = t === 0 ? gl.depth : 960 - gl.depth; g.moveTo(gx, gl.y1); g.lineTo(gx, gl.y2); g.stroke();
+  }
+  g.restore();
+}
+function drawBall(x, y, rot) {
+  ctx.save(); ctx.fillStyle = 'rgba(0,0,0,0.28)'; ctx.beginPath(); ctx.ellipse(x + 2, y + 13, 15, 6, 0, 0, 7); ctx.fill();
+  ctx.translate(x, y); ctx.rotate(rot);
+  const gr = ctx.createRadialGradient(-5, -6, 2, 0, 0, 17); gr.addColorStop(0, '#ffffff'); gr.addColorStop(1, '#d9d9e4');
+  ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(0, 0, 16, 0, 7); ctx.fill();
+  ctx.fillStyle = '#23202e'; ctx.beginPath(); for (let i = 0; i < 5; i++) { const a = i * 1.2566 - 1.5708; ctx.lineTo(Math.cos(a) * 6.5, Math.sin(a) * 6.5); } ctx.closePath(); ctx.fill();
+  for (let i = 0; i < 5; i++) { const a = i * 1.2566 - 1.5708; ctx.beginPath(); ctx.arc(Math.cos(a) * 15, Math.sin(a) * 15, 4.5, 0, 7); ctx.fill(); ctx.strokeStyle = '#23202e'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(Math.cos(a) * 6.5, Math.sin(a) * 6.5); ctx.lineTo(Math.cos(a) * 11, Math.sin(a) * 11); ctx.stroke(); }
+  ctx.strokeStyle = '#23202e'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(0, 0, 16, 0, 7); ctx.stroke(); ctx.restore();
+}
 function drawWalls(g, a) {
   for (const q of a.walls) { g.fillStyle = 'rgba(15,30,10,0.22)'; rrect(g, q.x + 3, q.y + 5, q.w, q.h, 6); g.fill(); }
   a.walls.forEach((q, qi) => {
@@ -722,6 +779,7 @@ function renderArena(g, a, idx, S) {
     const gr = g.createLinearGradient(0, q.y, 0, q.y + q.h); gr.addColorStop(0, '#5cc2f4'); gr.addColorStop(1, '#2f8ed6');
     g.fillStyle = gr; g.fillRect(q.x - 0.5, q.y - 0.5, q.w + 1, q.h + 1);
   }
+  if (a.bl) drawPitch(g, a);
   drawWalls(g, a);
   // soft edge vignette
   const vg = g.createRadialGradient(480, 320, 250, 480, 320, 620); vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,0.2)');
@@ -820,7 +878,7 @@ function draw(snap, age, now) {
 
   const b = snap.bd; ctx.save(); ctx.fillStyle = 'rgba(0,0,0,0.28)'; ctx.beginPath(); ctx.rect(0, 0, 960, 640); ctx.rect(b[0], b[1], b[2], b[3]); ctx.fill('evenodd'); ctx.restore();
   const me = snap.pl.find(p => p.id === myId); const warn = me && me.oo > 0 ? 1 : 0;
-  ctx.setLineDash([9, 9]); ctx.lineWidth = 3; ctx.strokeStyle = warn && Math.floor(now / 150) % 2 ? '#ff5a4a' : 'rgba(255,255,255,0.9)'; ctx.strokeRect(b[0], b[1], b[2], b[3]); ctx.setLineDash([]);
+  if (!snap.bl) { ctx.setLineDash([9, 9]); ctx.lineWidth = 3; ctx.strokeStyle = warn && Math.floor(now / 150) % 2 ? '#ff5a4a' : 'rgba(255,255,255,0.9)'; ctx.strokeRect(b[0], b[1], b[2], b[3]); ctx.setLineDash([]); }
 
   for (const h of snap.hz) {
     const a = Math.min(1, h[3] / 1.2);
@@ -853,6 +911,7 @@ function draw(snap, age, now) {
     if (p.gh && snap.gm) drawGoldAura(x, y, p.gt || 0, snap.gm, now);
     if (p.ds >= 0 && !p.dc) { drawDisguise(p.ds, x, y); ctx.restore(); continue; }   // no shadow: real props don't have one either
     ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.beginPath(); ctx.ellipse(x, y + 16, 14, 5, 0, 0, 7); ctx.fill();
+    if (p.tm !== undefined && TEAM[p.tm]) { ctx.strokeStyle = TEAM[p.tm].c; ctx.lineWidth = 3.5; ctx.beginPath(); ctx.ellipse(x, y + 15, 19, 8, 0, 0, 7); ctx.stroke(); }   // boomerang ball: a ring in the team colour
     if (p.iv && Math.floor(now / 70) % 2) ctx.globalAlpha = 0.5;
     
     const aimAngle = (p.id === myId && haveMouse) ? lastAim : p.a;
@@ -876,12 +935,18 @@ function draw(snap, age, now) {
     if (slv > 0) { ctx.strokeStyle = `rgba(255,255,255,${slv})`; ctx.lineWidth = 6; ctx.beginPath(); ctx.arc(x, y, 38, aimAngle - 1.3 + (1 - slv) * 0.8, aimAngle + 1.3 - slv * 0.2 * 0); ctx.stroke(); }
     if (p.bm) { ctx.fillStyle = '#ff6b6b'; ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('?!', x, y - 32); }
     if (!p.dc && cfg.names) {
-      ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'center'; ctx.lineWidth = 3; ctx.strokeStyle = '#120b1c'; ctx.fillStyle = p.id === myId ? '#ffc83b' : '#fff';
+      ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'center'; ctx.lineWidth = 3; ctx.strokeStyle = '#120b1c'; ctx.fillStyle = p.id === myId ? '#ffc83b' : (p.tm !== undefined && TEAM[p.tm] ? (p.tm === 0 ? '#a9ccff' : '#ffb3b3') : '#fff');
       const nm = names[p.id] || ''; ctx.strokeText(nm, x, y - 28); ctx.fillText(nm, x, y - 28);
     }
     ctx.restore();
   }
 
+  if (snap.bl && !snap.bp) {   // the ball rolls on, slowing down, between snapshots
+    const ex = Math.min(age, 0.1), k = ex * 0.9, bx = snap.bl[0] + snap.bl[2] * ex * (1 - k / 2), by = snap.bl[1] + snap.bl[3] * ex * (1 - k / 2), spd = Math.hypot(snap.bl[2], snap.bl[3]);
+    ballRot += (snap.bl[2] >= 0 ? 1 : -1) * spd * Math.min(0.05, (now - ballLast) / 1000) / 16;
+    drawBall(Math.max(0, Math.min(960, bx)), Math.max(0, Math.min(640, by)), ballRot);
+  }
+  ballLast = now;
   for (const o of snap.bo) if (o[2] !== 2) {
     const ex = Math.min(age, 0.07), x = o[0] + o[4] * ex, y = o[1] + o[5] * ex, own = real[o[3]];
     if (o[7]) { ctx.fillStyle = `rgba(255,120,20,${0.2 + 0.2 * Math.sin(now / 50)})`; ctx.beginPath(); ctx.arc(x, y, 14, 0, 7); ctx.fill(); }
@@ -924,12 +989,12 @@ function drawHUD(snap, me, now) {
   ctx.font = 'bold 15px sans-serif'; ctx.textAlign = 'left';
   real.forEach((p, i) => {
     const rw = snap.gm ? 236 : 170, y = 22 + i * 22; ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(6, y - 15, rw, 20);
-    ctx.fillStyle = V[p.v] ? V[p.v].body : '#fff'; ctx.beginPath(); ctx.arc(18, y - 5, 7, 0, 7); ctx.fill(); ctx.strokeStyle = '#000'; ctx.lineWidth = 2; ctx.stroke();
-    ctx.fillStyle = p.al ? '#fff' : '#ff9c8f'; ctx.fillText((p.al ? '' : '✖ ') + (names[p.id] || '').slice(0, 12), 30, y); ctx.textAlign = 'right'; ctx.fillStyle = '#ffc83b'; ctx.fillText(String(snap.sc[p.id] || 0), rw, y);
+    ctx.fillStyle = V[p.v] ? V[p.v].body : '#fff'; ctx.beginPath(); ctx.arc(18, y - 5, 7, 0, 7); ctx.fill(); ctx.strokeStyle = p.tm !== undefined && TEAM[p.tm] ? TEAM[p.tm].c : '#000'; ctx.lineWidth = p.tm !== undefined ? 3 : 2; ctx.stroke();
+    ctx.fillStyle = p.al ? '#fff' : '#ff9c8f'; ctx.fillText((p.al ? '' : '✖ ') + (names[p.id] || '').slice(0, 12), 30, y); ctx.textAlign = 'right'; ctx.fillStyle = '#ffc83b'; if (!snap.bl) ctx.fillText(String(snap.sc[p.id] || 0), rw, y); else if (!p.al && p.rt > 0) { ctx.font = 'bold 12px sans-serif'; ctx.fillStyle = '#ff9c8f'; ctx.fillText(p.rt.toFixed(1) + 's', rw, y); ctx.font = 'bold 15px sans-serif'; }
     if (snap.gm) { ctx.font = 'bold 12px sans-serif'; ctx.fillStyle = p.gh ? '#ffe36b' : 'rgba(255,255,255,0.75)'; ctx.fillText((p.gh ? '\u2605 ' : '') + (p.gt || 0).toFixed(1) + 's', rw - 26, y); ctx.font = 'bold 15px sans-serif'; }
     ctx.textAlign = 'left';
   });
-  ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.font = '12px sans-serif'; ctx.fillText(`${snap.sd ? 'SUDDEN DEATH' : 'Round ' + snap.rd} · ${(A.list[snap.ar] || {}).name || ''}${snap.tg && !snap.sd ? ' · first to ' + snap.tg + ' win' + (snap.tg === 1 ? '' : 's') : ''}`, 10, 22 + real.length * 22 + 6);
+  ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.font = '12px sans-serif'; ctx.fillText(`${snap.bl ? '' : (snap.sd ? 'SUDDEN DEATH' : 'Round ' + snap.rd) + ' · '}${(A.list[snap.ar] || {}).name || ''}${snap.tg && !snap.sd ? ' · first to ' + snap.tg + ' win' + (snap.tg === 1 ? '' : 's') : ''}`, 10, 22 + real.length * 22 + 6);
 
   if (me) {
     const pus = me.pu || []; ctx.textAlign = 'center'; ctx.font = 'bold 13px sans-serif';
@@ -963,6 +1028,25 @@ function drawHUD(snap, me, now) {
     if (!iAmSeeker && hs.ph === 'seek' && snap.ph === 'playing' && me && me.al) line(me.ds >= 0 ? 'You look like a prop. Keep still!' : 'Stand still to turn back into a prop', 96, '#bfe6ff', 'bold 15px sans-serif');
     ctx.restore();
   }
+  if (snap.bl) {   // boomerang ball: scoreboard, clock and goal banner
+    const sc2 = snap.bs || [0, 0], left = Math.max(0, snap.bq || 0), mm = Math.floor(left / 60), ss = String(left % 60).padStart(2, '0');
+    ctx.save(); ctx.textAlign = 'center'; ctx.lineJoin = 'round';
+    for (const t of [0, 1]) { ctx.fillStyle = TEAM[t].c; ctx.globalAlpha = 0.92; rrect(ctx, t === 0 ? 372 : 520, 8, 68, 40, 10); ctx.fill(); }
+    ctx.globalAlpha = 1; ctx.fillStyle = 'rgba(20,12,30,0.88)'; rrect(ctx, 438, 8, 84, 40, 8); ctx.fill();
+    ctx.font = 'bold 28px sans-serif'; ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(0,0,0,0.55)'; ctx.fillStyle = '#fff';
+    ctx.strokeText(String(sc2[0]), 406, 40); ctx.fillText(String(sc2[0]), 406, 40); ctx.strokeText(String(sc2[1]), 554, 40); ctx.fillText(String(sc2[1]), 554, 40);
+    ctx.font = 'bold 20px sans-serif'; ctx.fillStyle = snap.ov ? '#ff7a6b' : left <= 10 ? '#ff9c8f' : '#fff'; ctx.fillText(snap.ov ? 'OT' : `${mm}:${ss}`, 480, 36);
+    ctx.font = 'bold 12px sans-serif'; ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.fillText(snap.ov ? 'OVERTIME \u2014 next goal wins!' : snap.bg > 0 ? `First to ${snap.bg} goals \u00b7 or lead at full time` : 'Most goals when time runs out wins', 480, 62);
+    if (snap.bp && goalInfo) {
+      const col = TEAM[goalInfo.team] ? TEAM[goalInfo.team].c : '#ffc83b', ownG = goalInfo.lt >= 0 && goalInfo.lt !== goalInfo.team, pul = 1 + 0.06 * Math.sin(now / 90);
+      ctx.save(); ctx.translate(480, 250); ctx.scale(pul, pul); ctx.font = 'bold 88px sans-serif'; ctx.lineWidth = 12; ctx.strokeStyle = '#120b1c'; ctx.fillStyle = col; ctx.strokeText('GOAL!', 0, 0); ctx.fillText('GOAL!', 0, 0); ctx.restore();
+      ctx.font = 'bold 24px sans-serif'; ctx.lineWidth = 6; ctx.strokeStyle = '#120b1c'; ctx.fillStyle = '#fff';
+      const tx = `${TEAM[goalInfo.team] ? TEAM[goalInfo.team].n : ''} team scores${goalInfo.name ? (ownG ? ` (own goal by ${goalInfo.name})` : ` \u2014 ${goalInfo.name}`) : ''}`;
+      ctx.strokeText(tx, 480, 296); ctx.fillText(tx, 480, 296);
+    }
+    ctx.restore();
+  }
   announcements = announcements.filter(a => now - a.t0 < a.life);
   let annY = 130;
   for (const a of announcements) {
@@ -975,9 +1059,9 @@ function drawHUD(snap, me, now) {
 
   ctx.textAlign = 'center';
   const big = (txt, y, col) => { ctx.font = 'bold 64px sans-serif'; ctx.lineWidth = 8; ctx.strokeStyle = '#120b1c'; ctx.fillStyle = col || '#ffc83b'; ctx.strokeText(txt, 480, y); ctx.fillText(txt, 480, y); };
-  if (snap.ph === 'countdown') { big(String(Math.ceil(snap.tm)), 330); ctx.font = 'bold 20px sans-serif'; ctx.fillStyle = '#fff'; ctx.fillText(`Round ${snap.rd}`, 480, 270); if (snap.hs) { ctx.fillStyle = '#ffc83b'; ctx.fillText(`${names[snap.hs.sk] || '?'} is the seeker \u2014 everyone else, get ready to hide!`, 480, 390); } if (snap.gm) { ctx.fillStyle = '#ffe36b'; ctx.fillText(`Grab the Golden Boomerang and hold it for ${snap.gm} seconds to win the round!`, 480, 390); } }
-  else if (snap.ph === 'over') { if (!snap.hs) big(snap.w ? `${names[snap.w] || '?'} wins the round!` : 'Draw!', 330); }
-  else if (snap.ph === 'end') { big(snap.ch ? `${names[snap.ch] || '?'} wins the match!` : "It's a tie!", 320, '#7fe08a'); ctx.font = 'bold 20px sans-serif'; ctx.fillStyle = '#fff'; ctx.fillText('Returning to ' + (mode === 'mp' ? 'lobby' : 'menu') + '…', 480, 370); }
+  if (snap.ph === 'countdown') { big(String(Math.ceil(snap.tm)), 330); ctx.font = 'bold 20px sans-serif'; ctx.fillStyle = '#fff'; ctx.fillText(snap.bl ? 'Boomerang Ball' : `Round ${snap.rd}`, 480, 270); if (snap.bl && teamOf[myId] !== undefined) { ctx.fillStyle = TEAM[teamOf[myId]].c; ctx.fillText(`You are on the ${TEAM[teamOf[myId]].n} team \u2014 push the ball into the ${TEAM[1 - teamOf[myId]].n} goal ${teamOf[myId] === 0 ? '\u2192' : '\u2190'}`, 480, 390); } if (snap.hs) { ctx.fillStyle = '#ffc83b'; ctx.fillText(`${names[snap.hs.sk] || '?'} is the seeker \u2014 everyone else, get ready to hide!`, 480, 390); } if (snap.gm) { ctx.fillStyle = '#ffe36b'; ctx.fillText(`Grab the Golden Boomerang and hold it for ${snap.gm} seconds to win the round!`, 480, 390); } }
+  else if (snap.ph === 'over') { if (snap.bl) { if (snap.bw !== undefined && TEAM[snap.bw]) big(`${TEAM[snap.bw].n} team wins!`, 330, TEAM[snap.bw].c); } else if (!snap.hs) big(snap.w ? `${names[snap.w] || '?'} wins the round!` : 'Draw!', 330); }
+  else if (snap.ph === 'end') { big(snap.bl ? (TEAM[snap.ct] ? `${TEAM[snap.ct].n} team wins the match!` : 'Full time!') : snap.ch ? `${names[snap.ch] || '?'} wins the match!` : "It's a tie!", 320, '#7fe08a'); ctx.font = 'bold 20px sans-serif'; ctx.fillStyle = '#fff'; ctx.fillText('Returning to ' + (mode === 'mp' ? 'lobby' : 'menu') + '…', 480, 370); }
   if (cfg.hints && performance.now() - hintT < 12000 && snap.ph !== 'end' && !isBlind(snap)) { ctx.font = '13px sans-serif'; ctx.fillStyle = 'rgba(255,255,255,0.75)'; ctx.fillText('WASD move · aim mouse · hold + release click to throw' + (curSet.pullBack ? ' · hold click to pull back' : ' · walk over boomerangs to pick them up') + ' · right-click slash · Space dash', 480, 586); }
 }
 
@@ -1012,7 +1096,8 @@ function frame(nowT) {
 
 setInterval(() => { if (mode === 'mp') wsSend({ t: 'ping', c: performance.now() }); }, 1000);
 
-if (/[?&]debug\b/.test(location.search)) window.__mg = { net: NET };
+if (/[?&]debug\b/.test(location.search)) window.__mg = { layer: i => layerFor(i).toDataURL('image/png'), disp: () => { const m = mySnap(lastSnap); return m ? myDisp(m) : null; }, snap: () => lastSnap, music: () => ({ ctx: musicCtx, now: musicNow, paused: musicEl ? musicEl.paused : null, t: musicEl ? musicEl.currentTime : 0, vol: musicEl ? musicEl.volume : 0 }), pause: () => pauseOpen, cfg: () => cfg, binds: () => binds, net: NET, mouse: () => [mouseX, mouseY, haveMouse, lastAim, sc, offX, offY] };
+if (window.__mg) window.__mg.net = NET;
 requestAnimationFrame(frame);
 show('menu');
 })();

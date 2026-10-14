@@ -61,14 +61,20 @@ function freeVariant(room, want) {
 }
 function roomInfo(room) {
   return { t: 'room', code: room.code, hostId: room.host, inGame: !!room.match, settings: room.settings,
-    players: [...room.clients.values()].map(c => ({ id: c.id, name: c.name, variant: c.variant, spec: !!c.spec })) };
+    players: [...room.clients.values()].map(c => ({ id: c.id, name: c.name, variant: c.variant, spec: !!c.spec, team: c.spec ? -1 : (c.team === 0 || c.team === 1 ? c.team : -1) })) };
 }
 
 function startMatch(room) {
   const humans = [...room.clients.values()].filter(c => !c.spec).map(c => ({ id: c.id, name: c.name, variant: c.variant }));
-  let nb = Math.min(room.settings.bots, 6 - humans.length);
-  if (humans.length + nb < 2) nb = 2 - humans.length;
-  const infos = G.fillBots(humans, nb);
+  let infos;
+  if (room.settings.mode === 'ball') {   // boomerang ball: two even teams, bots fill the gaps
+    for (const h of humans) { const cl = room.clients.get(h.id); h.team = cl.team === 0 || cl.team === 1 ? cl.team : -1; }
+    infos = G.fillTeams(humans, room.settings.ballSize);
+  } else {
+    let nb = Math.min(room.settings.bots, 6 - humans.length);
+    if (humans.length + nb < 2) nb = 2 - humans.length;
+    infos = G.fillBots(humans, nb);
+  }
   room.match = new G.Match(room.settings, infos);
   broadcast(room, { t: 'start', infos, settings: room.settings });
 
@@ -160,11 +166,26 @@ wss.on('connection', ws => {
       case 'spec': {   // switch between playing and spectating in the lobby
         const r = c.room; if (!r || r.match) return;
         const want = !!m.on; if (want === !!c.spec) return;
-        if (want) { if (specCount(r) >= MAX_SPECTATORS) return send(ws, { t: 'err', m: 'No more spectator spots' }); c.spec = true; }
+        if (want) { if (specCount(r) >= MAX_SPECTATORS) return send(ws, { t: 'err', m: 'No more spectator spots' }); c.spec = true; c.team = -1; }
         else { if (playerCount(r) >= MAX_PLAYERS) return send(ws, { t: 'err', m: 'Room is full' }); c.spec = false; c.variant = freeVariant(r, c.variant); }
         broadcast(r, roomInfo(r)); break;
       }
       case 'settings': { const r = c.room; if (!r || r.host !== c.id || r.match) return; r.settings = G.sanitizeSettings(m.settings); broadcast(r, roomInfo(r)); break; }
+      case 'team': {   // boomerang ball: pick a side (yourself, or anyone if you are the host and the host sets the teams)
+        const r = c.room; if (!r || r.match) return;
+        const isHost = r.host === c.id, target = (m.id && isHost) ? r.clients.get(String(m.id)) : c;
+        if (!target || target.spec) return;
+        if (target === c && !isHost && r.settings.teamSel !== 'players') return;
+        if (target !== c && !isHost) return;
+        const tm = m.team === 0 || m.team === 1 ? m.team : -1;
+        if (tm >= 0 && [...r.clients.values()].filter(o => !o.spec && o !== target && o.team === tm).length >= 3) return send(ws, { t: 'err', m: 'That team is full' });
+        target.team = tm; broadcast(r, roomInfo(r)); break;
+      }
+      case 'shuffle': {
+        const r = c.room; if (!r || r.match || r.host !== c.id) return;
+        const ps = [...r.clients.values()].filter(o => !o.spec).sort(() => Math.random() - 0.5), off = Math.random() < 0.5 ? 0 : 1;
+        ps.forEach((o, i) => { o.team = (i + off) % 2; }); broadcast(r, roomInfo(r)); break;
+      }
       case 'variant': { const r = c.room; if (!r || r.match) return; if (c.spec) return; const used = [...r.clients.values()].some(o => o !== c && !o.spec && o.variant === m.v); if (Number.isInteger(m.v) && m.v >= 0 && m.v < G.VARIANTS.length && !used) { c.variant = m.v; broadcast(r, roomInfo(r)); } break; }
       case 'start': { const r = c.room; if (!r || r.host !== c.id || r.match) return; startMatch(r); break; }
       case 'leave': leaveRoom(c); break;

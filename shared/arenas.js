@@ -140,6 +140,13 @@ const village = tidy(clearPaths([big('roof', 90, 70, 120, 90), big('roof', 230, 
   ...stack(570, 268, 3, 1), ...stack(262, 190, 2, 2), ...stack(440, 540, 1, 2, 'barrel'), ...along('crate', [[570, 430], [640, 455], [690, 500]], 40), ...along('barrel', [[250, 440], [280, 400], [225, 350]], 36),
   ...clump(180, 'bush', 480, 560, 4, 26), ...clump(181, ['crate', 'barrel'], 860, 280, 5, 30), ...clump(182, 'bush', 60, 560, 3, 20), ...clump(183, 'barrel', 740, 400, 3, 18), ...clump(184, 'bush', 300, 560, 3, 20), ...clump(185, 'crate', 120, 270, 4, 24), ...clump(186, 'bush', 880, 170, 3, 18)], FL.village), []);
 
+
+// ---- Boomerang Ball pitches: full-screen play area, a goal mouth in the middle of each short side (posts are the little walls), spawns per team
+const GOAL = { y1: 240, y2: 400, depth: 40 };
+const post = q => Object.assign(q, { k: 'post' });
+const posts = [post(r(0, GOAL.y1 - 14, GOAL.depth, 14)), post(r(0, GOAL.y2, GOAL.depth, 14)), post(r(W - GOAL.depth, GOAL.y1 - 14, GOAL.depth, 14)), post(r(W - GOAL.depth, GOAL.y2, GOAL.depth, 14))];
+const pitchBounds = r(0, 0, W, H);
+const BALL_SPAWN_T = [[190, 320], [250, 190], [250, 450]];   // team 0 spawns (team 1 is the mirror image)
 const specs = [
   { name: 'Grassy Plains', walls: [...quad([r(240, 170, 38, 38)]), r(461, 301, 38, 38)] },
   { name: 'Pillar Park', walls: [...quad([r(250, 170, 50, 50)]), r(455, 295, 50, 50)] },
@@ -185,6 +192,11 @@ const specs = [
   { name: 'Dockside', hs: 'only', walls: dock, water: dockWater, floors: FL.dock },
   { name: 'Hedge Gardens', hs: 'only', walls: garden, water: gardenWater, floors: FL.garden },
   { name: 'Village Market', hs: 'only', walls: village, floors: FL.village },
+  { name: 'Kickoff Meadow', ball: true, bounds: pitchBounds, walls: [...posts, ...quad([r(300, 110, 40, 40)])] },
+  { name: 'Pillar Pitch', ball: true, bounds: pitchBounds, walls: [...posts, ...quad([r(330, 150, 44, 44), r(250, 80, 36, 36)])] },
+  { name: 'Center Wall', ball: true, bounds: pitchBounds, walls: [...posts, r(468, 40, 24, 150), r(468, 450, 24, 150), ...quad([r(300, 260, 30, 30)])] },
+  { name: 'Crate Yard', ball: true, bounds: pitchBounds, walls: [...posts, ...quad([r(100, 190, 30, 30), r(132, 190, 30, 30), r(100, 222, 30, 30), r(380, 210, 30, 30)])] },
+  { name: 'Hedge Pitch', ball: true, bounds: pitchBounds, walls: [...posts, ...quad([r(260, 40, 150, 24), r(430, 120, 24, 70)])] },
 ];
 
 // Look of each map: [theme, ...obstacle kinds]. Obstacles are drawn as these objects, and the Disguise power-up turns
@@ -204,6 +216,7 @@ const META = {
   'Cross Bridge Cliffs': ['stone', 'rock'], 'Shrine': ['stone', 'pillar'], 'Hedge Maze': ['forest', 'bush'],
   'Chaos Garden': ['forest', 'bush', 'rock'], 'Dunes B': ['sand', 'rock', 'crate'], 'Lakeside': ['forest', 'bush', 'rock'],
   'Wet Woods': ['forest', 'bush', 'rock'],
+  'Kickoff Meadow': ['meadow', 'rock'], 'Pillar Pitch': ['stone', 'pillar'], 'Center Wall': ['sand', 'crate'], 'Crate Yard': ['sand', 'crate'], 'Hedge Pitch': ['forest', 'bush'],
   'Old Orchard': ['meadow', 'bush', 'crate', 'barrel', 'rock'], 'Boulder Canyon': ['sand', 'rock', 'barrel'], 'Ruined Temple': ['meadow', 'pillar', 'barrel'],
   'Dockside': ['sand', 'crate', 'barrel'], 'Hedge Gardens': ['forest', 'bush', 'rock'], 'Village Market': ['sand', 'crate', 'barrel', 'bush', 'rock'],
 };
@@ -211,7 +224,7 @@ const META = {
 const HS_SHARED = ['Dunes A', 'Dunes B', 'Chaos Garden', 'Wet Woods', 'Hedge Maze'];   // standard maps that are also played in hide & seek
 function build(s) {
   const m = META[s.name] || ['meadow', 'rock'], kinds = m.slice(1);
-  const a = { name: s.name, hs: s.hs || (HS_SHARED.includes(s.name) ? 'both' : ''), w: W, h: H, theme: m[0], bounds: s.bounds || r(60, 50, 840, 540), walls: (s.walls || []).map((q, i) => ({ x: q.x, y: q.y, w: q.w, h: q.h, k: q.k || (s.mix ? kinds[i % kinds.length] : kinds[0]) })), water: s.water || [], floors: s.floors || [], holes: s.holes || [], wet: (s.wet || []).slice(), puddles: (s.wet || []).slice() };
+  const a = { name: s.name, bl: !!s.ball, hs: s.hs || (HS_SHARED.includes(s.name) ? 'both' : ''), w: W, h: H, theme: m[0], bounds: s.bounds || r(60, 50, 840, 540), walls: (s.walls || []).map((q, i) => ({ x: q.x, y: q.y, w: q.w, h: q.h, k: q.k || (s.mix ? kinds[i % kinds.length] : kinds[0]) })), water: s.water || [], floors: s.floors || [], holes: s.holes || [], wet: (s.wet || []).slice(), puddles: (s.wet || []).slice() };
   a.kinds = [...new Set(a.walls.map(q => q.k))];
   if (s.hs === 'only') { const small = a.walls.filter(q => q.w === P && q.h === P && q.k !== 'roof'); if (small.length) a.kinds = [...new Set(small.map(q => q.k))]; }   // hiders copy the small props
   for (const q of a.water) a.wet.push(r(q.x - 26, q.y - 26, q.w + 52, q.h + 52));
@@ -226,6 +239,10 @@ function build(s) {
       sizes.push(n);
     }
     const best = sizes.indexOf(Math.max(...sizes)); main = (x, y) => comp[Math.round(x / cs) * gh + Math.round(y / cs)] === best;
+  }
+  if (s.ball) {
+    a.spawns = [...BALL_SPAWN_T, ...BALL_SPAWN_T.map(q => [W - q[0], q[1]])];   // 0-2 team 0 (left), 3-5 team 1 (right)
+    a.goal = GOAL; return a;
   }
   for (let k = 0; k < 6; k++) {
     const ang = -Math.PI / 2 + k * Math.PI / 3;
@@ -244,7 +261,7 @@ function build(s) {
 
 const list = specs.map(build);
 // can this map be used in this scoring mode? (hide & seek has its own maps plus a few shared ones)
-const usable = (i, mode) => { const h = list[i].hs; return mode === 'hide' ? !!h : h !== 'only'; };
-const api = { W, H, KINDS, list, freeAt, circleRect, usable };
+const usable = (i, mode) => { const a = list[i], h = a.hs; return mode === 'ball' ? !!a.bl : a.bl ? false : mode === 'hide' ? !!h : h !== 'only'; };
+const api = { W, H, KINDS, list, freeAt, circleRect, usable, GOAL };
 if (typeof module === 'object' && module.exports) module.exports = api; else root.MGArenas = api;
 })(typeof self !== 'undefined' ? self : globalThis);
