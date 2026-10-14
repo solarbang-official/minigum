@@ -270,6 +270,7 @@
     <div id="variants"></div>
     <div class="row"><button id="btnSP">Single Player</button></div>
     <div class="row"><button id="btnCreate" class="sec">Create Online Room</button></div>
+    <label class="field-label" style="margin-top:6px" title="Watch the match instead of playing. Spectators can also join a match that is already running."><span>&#128065;&#65039; Join online rooms as a spectator</span> <input id="spectate" type="checkbox"></label>
     <div class="row">
       <input id="joinCode" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="ROOM CODE" style="text-transform:uppercase;flex:1.2">
       <button id="btnJoin" class="sec">Join Room</button>
@@ -300,7 +301,7 @@
       <div id="variants2"></div>
     </div>
     <div id="lobForm"></div>
-    <div class="row"><button id="lobStart">Start Match</button><button id="lobSettings" class="sec" type="button">Settings</button><button id="lobLeave" class="sec">Leave</button></div>
+    <div class="row"><button id="lobStart">Start Match</button><button id="lobSpec" class="sec" type="button">Spectate instead</button><button id="lobSettings" class="sec" type="button">Settings</button><button id="lobLeave" class="sec">Leave</button></div>
     <div class="hint" id="lobHint"></div>
   </div>
 </div>
@@ -331,4 +332,4 @@
 <script src="/shared/game.js"></script>
 <script src="/client.js"></script>
 </body>
-</html>
+</html>

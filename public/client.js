@@ -10,8 +10,10 @@ const fishImgs = V.map((v, i) => { const im = new Image(); im.src = fishSrc(i); 
 
 // ---------- state ----------
 let curSet = {};   // settings of the match being played
+let wantSpec = localStorage.mgSpec === '1';
 let myName = localStorage.mgName || '', myVar = +localStorage.mgVar || 0;
-let spSettings = Object.assign({ arenas: A.list.map((_, i) => i), mode: 'last', target: 5, books: 'normal', boomSpeed: 'normal', bounce: true, pullBack: false, homing: false, goldThrow: false, puCarry: false, underdog: false, ai: 1, bots: 3, pus: G.PU_IDS ? G.PU_IDS.slice() : [] }, safeParse(localStorage.mgSP));
+let spSettings = Object.assign({ arenas: A.list.map((_, i) => i), mode: 'last', target: 5, books: 'normal', boomSpeed: 'normal', bounce: true, pullBack: false, homing: false, goldThrow: false, puCarry: false, hideTime: 60, hideUses: 12, hideWins: 3, underdog: false, ai: 1, bots: 3, pus: G.PU_IDS ? G.PU_IDS.slice() : [] }, safeParse(localStorage.mgSP));
+try { if (!localStorage.mgMapsV8 && Array.isArray(spSettings.arenas)) { for (let i = 0; i < A.list.length; i++) if (A.list[i].hs === 'only' && !spSettings.arenas.includes(i)) spSettings.arenas.push(i); localStorage.mgMapsV8 = '1'; } } catch (e) {}   // new hide & seek maps start ticked
 function safeParse(s) { try { return JSON.parse(s) || {}; } catch (e) { return {}; } }
 let mode = 'menu';
 let ws = null, myId = null, room = null;
@@ -112,17 +114,20 @@ function formHTML(botsLabel, botsMin) {
   const puInfo = (G && G.PU_INFO) ? G.PU_INFO : {};
   return `<div class="pu-header">\u{1F5FA}\uFE0F Maps in rotation <span class="mapcount" data-mapcount></span></div>
   <div class="row maprow"><button type="button" class="sec small" data-mapsel="all">Select all</button><button type="button" class="sec small" data-mapsel="none">Deselect all</button></div>
-  <div class="map-grid">${arenas.map((a, i) => `<label class="map-card" title="${a.name}"><input type="checkbox" data-map="${i}"><canvas width="132" height="88" data-thumb="${i}"></canvas><span>${i + 1}. ${a.name}</span></label>`).join('')}</div>
-  <label class="field-label">Scoring <select data-k="mode"><option value="last">👑 Last one standing</option><option value="kill">⚔️ Point per kill</option><option value="golden">\u{1F3C6} Golden Boomerang (hold it 14s)</option></select></label>
-  <label class="field-label"><span data-targetlabel>Rounds to win</span> <input data-k="target" type="number" min="1" max="25"></label>
-  <label class="field-label">Blue book spawn <select data-k="books"><option value="off">Off</option><option value="slow">Slow</option><option value="normal">Normal</option><option value="fast">Fast</option></select></label>
+  <div class="map-grid">${arenas.map((a, i) => `<label class="map-card" title="${a.name}${a.hs === 'only' ? ' (Hide &amp; Seek only)' : a.hs ? ' (also in Hide &amp; Seek)' : ''}"><input type="checkbox" data-map="${i}"><canvas width="132" height="88" data-thumb="${i}"></canvas><span>${i + 1}. ${a.name}${a.hs === 'only' ? ' \u{1F648}' : ''}</span></label>`).join('')}</div>
+  <label class="field-label">Scoring <select data-k="mode"><option value="last">👑 Last one standing</option><option value="kill">⚔️ Point per kill</option><option value="golden">\u{1F3C6} Golden Boomerang (hold it 14s)</option><option value="hide">\u{1F648} Hide &amp; Seek</option></select></label>
+  <label class="field-label" data-nomode="hide"><span data-targetlabel>Rounds to win</span> <input data-k="target" type="number" min="1" max="25"></label>
+  <label class="field-label" data-mode="hide" title="Round wins needed to win the match. A round win = the seeker finds everyone, or a hider stays hidden until time runs out. If several players reach it in the same round, they play a sudden-death Battle Royale and everyone else spectates.">Wins needed to win the match <input data-k="hideWins" type="number" min="1" max="25"></label>
+  <label class="field-label" data-mode="hide" title="How long the hiders must stay hidden for the hiders to win the round.">Hiders win after (seconds) <input data-k="hideTime" type="number" min="10" max="600"></label>
+  <label class="field-label" data-mode="hide" title="How many swings and throws the seeker gets. Finding a hider gives back 3. 0 = no limit.">Seeker melee + throw limit (0 = unlimited) <input data-k="hideUses" type="number" min="0" max="99"></label>
+  <label class="field-label" data-nomode="hide">Blue book spawn <select data-k="books"><option value="off">Off</option><option value="slow">Slow</option><option value="normal">Normal</option><option value="fast">Fast</option></select></label>
   <label class="field-label">Boomerang Speed <select data-k="boomSpeed"><option value="slow">Slow</option><option value="normal">Normal</option><option value="fast">Fast</option><option value="insane">Insane</option></select></label>
   <label class="field-label">Boomerangs bounce off walls <input data-k="bounce" type="checkbox"></label>
   <label class="field-label" title="Hold the throw button to pull your boomerangs back. Off: walk over them to pick them up.">Pull back (hold throw to recall) <input data-k="pullBack" type="checkbox"></label>
   <label class="field-label" title="Thrown boomerangs arc slightly towards enemy players.">Homing boomerangs <input data-k="homing" type="checkbox"></label>
   <label class="field-label" data-mode="golden" title="Golden Boomerang mode: off means the holder can only use melee.">Golden holder can throw it <input data-k="goldThrow" type="checkbox"></label>
-  <label class="field-label" title="Keep your power-ups when the next round starts.">Power-ups carry over between rounds <input data-k="puCarry" type="checkbox"></label>
-  <label class="field-label">Losers start with shield <input data-k="underdog" type="checkbox"></label>
+  <label class="field-label" data-nomode="hide" title="Keep your power-ups when the next round starts.">Power-ups carry over between rounds <input data-k="puCarry" type="checkbox"></label>
+  <label class="field-label" data-nomode="hide">Losers start with shield <input data-k="underdog" type="checkbox"></label>
   <label class="field-label">AI skill <select data-k="ai"><option value="0">Easy</option><option value="1">Normal</option><option value="2">Hard</option></select></label>
   <label class="field-label">${botsLabel} <input data-k="bots" type="number" min="${botsMin}" max="5"></label>
   <div class="pu-header">⚡ Enabled Powerups</div>
@@ -131,8 +136,9 @@ function formHTML(botsLabel, botsMin) {
   </div>`;
 }
 
+const mapShown = cb => !cb.closest('.map-card').classList.contains('hidden');   // maps that suit the selected scoring mode
 function updateMapCount(el) {
-  const n = el.querySelectorAll('[data-map]:checked').length, t = el.querySelectorAll('[data-map]').length, c = el.querySelector('[data-mapcount]');
+  const all = [...el.querySelectorAll('[data-map]')].filter(mapShown), n = all.filter(c => c.checked).length, t = all.length, c = el.querySelector('[data-mapcount]');
   if (c) c.textContent = n === 0 ? '(none ticked = all maps)' : n + ' of ' + t;
 }
 function paintThumbs(el) {   // the little map previews, painted a few at a time so the menu stays responsive
@@ -143,7 +149,7 @@ function wireMapPicker(el) {
   if (!el) return;
   el.addEventListener('click', e => {
     const b = e.target.closest('[data-mapsel]'); if (!b || b.disabled) return;
-    for (const cb of el.querySelectorAll('[data-map]')) cb.checked = b.dataset.mapsel === 'all';
+    for (const cb of el.querySelectorAll('[data-map]')) if (mapShown(cb)) cb.checked = b.dataset.mapsel === 'all';
     updateMapCount(el); el.dispatchEvent(new Event('change', { bubbles: true }));
   });
   el.addEventListener('change', e => { if (e.target.matches && e.target.matches('[data-map]')) updateMapCount(el); if (e.target.matches && e.target.matches('[data-k=mode]')) syncModeOptions(el, e.target.value); });
@@ -151,6 +157,9 @@ function wireMapPicker(el) {
 // options that belong to one scoring mode only show while that mode is selected
 function syncModeOptions(el, mode) {
   for (const e of el.querySelectorAll('[data-mode]')) e.classList.toggle('hidden', e.dataset.mode !== mode);
+  for (const e of el.querySelectorAll('[data-nomode]')) e.classList.toggle('hidden', e.dataset.nomode === mode);
+  for (const cb of el.querySelectorAll('[data-map]')) cb.closest('.map-card').classList.toggle('hidden', !(A.usable ? A.usable(+cb.dataset.map, mode) : true));   // hide & seek has its own maps
+  updateMapCount(el);
   const t = el.querySelector('[data-targetlabel]'); if (t) t.textContent = mode === 'kill' ? 'Kills to win' : 'Rounds to win';
 }
 function fillForm(el, v, disabled) {
@@ -231,10 +240,12 @@ function connect(then) {
   };
 }
 
-if ($('#btnCreate')) $('#btnCreate').onclick = () => connect(() => wsSend({ t: 'create', name: myName || 'Player', variant: myVar }));
-if ($('#btnJoin')) $('#btnJoin').onclick = () => { const c = $('#joinCode') ? $('#joinCode').value.trim() : ''; if (c.length < 4) { if ($('#menuErr')) $('#menuErr').textContent = 'Enter the 4-letter room code'; return; } connect(() => wsSend({ t: 'join', code: c, name: myName || 'Player', variant: myVar })); };
+if ($('#spectate')) { $('#spectate').checked = wantSpec; $('#spectate').onchange = e => { wantSpec = e.target.checked; try { localStorage.mgSpec = wantSpec ? '1' : '0'; } catch (er) {} }; }
+if ($('#btnCreate')) $('#btnCreate').onclick = () => connect(() => wsSend({ t: 'create', name: myName || 'Player', variant: myVar, spec: wantSpec }));
+if ($('#btnJoin')) $('#btnJoin').onclick = () => { const c = $('#joinCode') ? $('#joinCode').value.trim() : ''; if (c.length < 4) { if ($('#menuErr')) $('#menuErr').textContent = 'Enter the 4-letter room code'; return; } connect(() => wsSend({ t: 'join', code: c, name: myName || 'Player', variant: myVar, spec: wantSpec })); };
 if ($('#lobLeave')) $('#lobLeave').onclick = () => { wsSend({ t: 'leave' }); toMenu(); };
 if ($('#lobStart')) $('#lobStart').onclick = () => wsSend({ t: 'start' });
+if ($('#lobSpec')) $('#lobSpec').onclick = () => { const me = room && room.players.find(p => p.id === myId); wsSend({ t: 'spec', on: !(me && me.spec) }); };
 // ---------- copy room code ----------
 function legacyCopy(text) {
   try {
@@ -269,9 +280,15 @@ if ($('#lobForm')) $('#lobForm').addEventListener('change', () => { if (room && 
 
 function renderLobby() {
   if ($('#lobCode')) $('#lobCode').textContent = room.code;
-  if ($('#plist')) $('#plist').innerHTML = room.players.map(p => `<div><img src="${fishSrc(p.variant)}"><span>${esc(p.name)}${p.id === myId ? ' (you)' : ''}${p.id === room.hostId ? ' ★' : ''}</span></div>`).join('');
-  const me = room.players.find(p => p.id === myId); if (me) myVar = me.variant;
-  const taken = new Set(room.players.filter(p => p.id !== myId).map(p => p.variant));
+  const tag = p => `${esc(p.name)}${p.id === myId ? ' (you)' : ''}${p.id === room.hostId ? ' ★' : ''}`;
+  const plrs = room.players.filter(p => !p.spec), specs = room.players.filter(p => p.spec);
+  if ($('#plist')) $('#plist').innerHTML = plrs.map(p => `<div><img src="${fishSrc(p.variant)}"><span>${tag(p)}</span></div>`).join('') +
+    specs.map(p => `<div style="opacity:.7"><span style="font-size:22px">\u{1F441}\uFE0F</span><span>${tag(p)} <em style="color:var(--muted);font-size:14px">spectating</em></span></div>`).join('');
+  const me = room.players.find(p => p.id === myId); if (me && !me.spec) myVar = me.variant;
+  const iSpec = !!(me && me.spec);
+  const taken = new Set(plrs.filter(p => p.id !== myId).map(p => p.variant));
+  if ($('#lobVariants')) $('#lobVariants').classList.toggle('hidden', iSpec);
+  if ($('#lobSpec')) $('#lobSpec').textContent = iSpec ? 'Play instead' : 'Spectate instead';
   buildVariantPicker($('#variants2'), taken, i => wsSend({ t: 'variant', v: i }));
   const host = room.hostId === myId;
   const lobForm = $('#lobForm');
@@ -338,11 +355,16 @@ function canThrow(snap) {
 addEventListener('mouseup', e => { if (e.button === 0 && lmbHeld) { lmbHeld = false; if (lmbSlash) { if (mode === 'sp' || mode === 'mp') { latch.m = true; netAct('m'); } } else if (!recallHold && (mode === 'sp' || mode === 'mp')) { latch.t = true; netAct('t'); } recallHold = false; lmbSlash = false; } });
 addEventListener('blur', releaseInput);
 
+// hide & seek: the seeker's screen is covered while the hiders hide
+// the seeker first gets a look at the empty map (the others are not drawn), then their screen goes dark until the hiders have hidden
+function isSeeker(snap) { return !!(snap && snap.hs && snap.hs.sk === myId); }
+function isBlind(snap) { return isSeeker(snap) && snap.ph === 'playing' && snap.hs.ph === 'hide' && snap.hs.t <= snap.hs.bt; }
+function isLook(snap) { return isSeeker(snap) && (snap.ph === 'countdown' || (snap.ph === 'playing' && snap.hs.ph === 'hide' && snap.hs.t > snap.hs.bt)); }
 let lastAim = 0;
 function buildInput(snap) {
   const me = snap && snap.pl.find(p => p.id === myId);
   if (me && haveMouse) { const dp = myDisp(me), px = dp[0], py = dp[1]; lastAim = Math.atan2(mouseY - py, mouseX - px); }
-  if (uiOpen()) return { mx: 0, my: 0, aim: lastAim, dh: false, tt: false, mm: false, dd: false, rr: false };   // menu open: stand still, no actions
+  if (uiOpen() || isBlind(snap)) return { mx: 0, my: 0, aim: lastAim, dh: false, tt: false, mm: false, dd: false, rr: false };   // menu open (or seeker blindfolded): stand still, no actions
   const mx = (keys.r ? 1 : 0) - (keys.l ? 1 : 0), my = (keys.d ? 1 : 0) - (keys.u ? 1 : 0);
   return { mx, my, aim: lastAim, dh: !!keys.dash, tt: latch.t, mm: latch.m, dd: latch.d, rr: latch.r || (lmbHeld && recallHold) };
 }
@@ -431,9 +453,9 @@ function renderPause() {
   const snap = lastSnap, byId = {};
   if (snap) for (const p of snap.pl) if (!p.dc) byId[p.id] = p;
   const html = infos.map(i => {
-    const p = byId[i.id], alive = p ? !!p.al : true, sc = snap && snap.sc ? (snap.sc[i.id] || 0) : 0;
+    const p = byId[i.id], inRound = !snap || !snap.sd || !!p, alive = p ? !!p.al : inRound, sc = snap && snap.sc ? (snap.sc[i.id] || 0) : 0;
     const host = mode === 'mp' && room && room.hostId === i.id ? ' ★' : '';
-    return `<div class="${alive ? '' : 'out'}"><img src="${fishSrc(i.variant)}"><span class="nm">${esc(i.name)}${i.id === myId ? ' (you)' : ''}${host}</span><span class="st">${alive ? '' : 'out'}</span><span class="sc">${sc}</span></div>`;
+    return `<div class="${alive ? '' : 'out'}"><img src="${fishSrc(i.variant)}"><span class="nm">${esc(i.name)}${i.id === myId ? ' (you)' : ''}${host}</span><span class="st">${alive ? '' : inRound ? 'out' : 'spectating'}</span><span class="sc">${sc}</span></div>`;
   }).join('');
   if (html !== lastPauseHtml) { lastPauseHtml = html; list.innerHTML = html; }
 }
@@ -544,6 +566,8 @@ function playEvents(evs) {
       case 'die': fx.push({ k, x, y, t0: now, life: 700, w: e[3] }); beep(300, 0.35, 'sawtooth', 0.07, -220); break;
       case 'pk': fx.push({ k, x, y, t0: now, life: 500 }); beep(700, 0.12, 'sine', 0.06, 500); break;
       case 'pu_ann': addAnnouncement(e[2] || names[e[1]] || 'Player', e[3], e[4]); beep(850, 0.25, 'sine', 0.08, 300); break;
+      case 'found': beep(660, 0.18, 'square', 0.08, 990); break;
+      case 'hs_go': beep(440, 0.3, 'triangle', 0.1, 880); break;
       case 'tp': fx.push({ k, x, y, t0: now, life: 300 }, { k, x: e[3], y: e[4], t0: now, life: 300 }); beep(900, 0.2, 'sine', 0.05, -500); break;
       case 'th': if (now - NET.thSnd < 600) { NET.thSnd = -1e9; break; } beep(380, 0.1, 'triangle', 0.04, 200); break;
       case 'sl': fx.push({ k, x, y, t0: now, life: 200 }); if (now - NET.slSnd < 600) { NET.slSnd = -1e9; break; } beep(250, 0.08, 'square', 0.04, -100); break;
@@ -615,9 +639,43 @@ function drawObstacle(g, kind, x, y, w, h, sd) {
   }
   g.restore();
 }
+// a building seen from above: tiled roof with a ridge along its long side
+function drawRoof(g, x, y, w, h, sd) {
+  const cols = ['#b5533c', '#a04a3a', '#8e6b4a', '#a85f3a'], col = cols[sd % cols.length], wide = w >= h;
+  g.save(); g.lineJoin = 'round'; g.fillStyle = col; rrect(g, x, y, w, h, 6); g.fill();
+  g.save(); rrect(g, x, y, w, h, 6); g.clip();
+  g.strokeStyle = 'rgba(0,0,0,0.16)'; g.lineWidth = 1.5; g.beginPath();
+  for (let t = 10; t < (wide ? h : w); t += 10) { if (wide) { g.moveTo(x, y + t); g.lineTo(x + w, y + t); } else { g.moveTo(x + t, y); g.lineTo(x + t, y + h); } }
+  g.stroke();
+  g.fillStyle = 'rgba(255,255,255,0.14)'; if (wide) g.fillRect(x, y, w, h / 2); else g.fillRect(x, y, w / 2, h);
+  g.strokeStyle = 'rgba(0,0,0,0.35)'; g.lineWidth = 3; g.beginPath(); if (wide) { g.moveTo(x, y + h / 2); g.lineTo(x + w, y + h / 2); } else { g.moveTo(x + w / 2, y); g.lineTo(x + w / 2, y + h); } g.stroke();
+  g.restore(); g.strokeStyle = '#4e2a1e'; g.lineWidth = 2.5; rrect(g, x + 1, y + 1, w - 2, h - 2, 6); g.stroke(); g.restore();
+}
+// ground detail: dirt tracks, gravel walks, plank decks, flagstones, cobbles
+function drawFloors(g, a, R) {
+  const PC = { dirt: ['#c4a06c', '#b08c58'], gravel: ['#ddd5c0', '#c4bba3'], flag: ['#aaa399', '#8e877c'], cobble: ['#b5aa9a', '#968b7b'], plank: ['#b98a58', '#8a6238'] };
+  for (const f of a.floors || []) {
+    const [c1, c2] = PC[f.c] || PC.dirt;
+    g.lineCap = 'round'; g.lineJoin = 'round';
+    if (f.t === 'path') {
+      g.strokeStyle = c2; g.lineWidth = f.w + 6; g.beginPath(); f.pts.forEach((p, i) => i ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1])); g.stroke();
+      g.strokeStyle = c1; g.lineWidth = f.w; g.stroke();
+      g.fillStyle = c2; for (let i = 1; i < f.pts.length; i++) { const [x1, y1] = f.pts[i - 1], [x2, y2] = f.pts[i], n = Math.round(Math.hypot(x2 - x1, y2 - y1) / 14); for (let k = 0; k < n; k++) { const t = k / n, ox = (R() - 0.5) * f.w * 0.8, oy = (R() - 0.5) * f.w * 0.8; g.globalAlpha = 0.55; g.beginPath(); g.arc(x1 + (x2 - x1) * t + ox, y1 + (y2 - y1) * t + oy, 1.4 + R() * 1.4, 0, 7); g.fill(); } }
+      g.globalAlpha = 1;
+    } else {
+      g.fillStyle = c2; rrect(g, f.x - 3, f.y - 3, f.w + 6, f.h + 6, 6); g.fill(); g.fillStyle = c1; rrect(g, f.x, f.y, f.w, f.h, 4); g.fill();
+      g.save(); rrect(g, f.x, f.y, f.w, f.h, 4); g.clip(); g.strokeStyle = c2; g.lineWidth = 1.5; g.globalAlpha = 0.7; g.beginPath();
+      if (f.c === 'plank') { for (let y = f.y + 14; y < f.y + f.h; y += 14) { g.moveTo(f.x, y); g.lineTo(f.x + f.w, y); } for (let y = f.y, r = 0; y < f.y + f.h; y += 14, r++) for (let x = f.x + (r * 53) % 90; x < f.x + f.w; x += 90) { g.moveTo(x, y); g.lineTo(x, y + 14); } }
+      else if (f.c === 'flag') { for (let x = f.x + 40; x < f.x + f.w; x += 40) { g.moveTo(x, f.y); g.lineTo(x, f.y + f.h); } for (let y = f.y + 40; y < f.y + f.h; y += 40) { g.moveTo(f.x, y); g.lineTo(f.x + f.w, y); } }
+      else { for (let i = 0; i < f.w * f.h / 260; i++) { const x = f.x + R() * f.w, y = f.y + R() * f.h; g.moveTo(x + 5, y); g.arc(x, y, 5, 0, 7); } }
+      g.stroke(); g.restore(); g.globalAlpha = 1;
+    }
+  }
+}
 function drawWalls(g, a) {
   for (const q of a.walls) { g.fillStyle = 'rgba(15,30,10,0.22)'; rrect(g, q.x + 3, q.y + 5, q.w, q.h, 6); g.fill(); }
   a.walls.forEach((q, qi) => {
+    if (q.k === 'roof') { drawRoof(g, q.x, q.y, q.w, q.h, qi); return; }
     const nx = Math.max(1, Math.round(q.w / 30)), ny = Math.max(1, Math.round(q.h / 30)), cw = q.w / nx, ch = q.h / ny;
     for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) drawObstacle(g, q.k, q.x + i * cw, q.y + j * ch, cw, ch, qi * 131 + i * 17 + j * 7);
   });
@@ -645,6 +703,7 @@ function renderArena(g, a, idx, S) {
     const x = 20 + R() * 920, y = 20 + R() * 600; if (!open(x, y)) continue; n++;
     g.fillStyle = th.fleck[n % th.fleck.length]; g.beginPath(); g.arc(x, y, 2.2, 0, 7); g.fill();
   }
+  drawFloors(g, a, R);
   // damp ground around water, and shallow puddles
   g.fillStyle = 'rgba(40,110,150,0.13)'; for (const q of a.wet) { rrect(g, q.x, q.y, q.w, q.h, 22); g.fill(); }
   for (const q of a.puddles) {
@@ -693,6 +752,7 @@ function drawBoom(x, y, rot, col, alpha) {
 function drawDisguise(k, x, y) {
   if (!ctx) return;
   const kind = A.KINDS ? A.KINDS[k] : 'rock';
+  ctx.fillStyle = 'rgba(15,30,10,0.22)'; rrect(ctx, x - 12, y - 10, 30, 30, 6); ctx.fill();   // the same drop shadow real props have
   drawObstacle(ctx, kind, x - 15, y - 15, 30, 30, k * 53 + 7);
 }
 
@@ -774,23 +834,25 @@ function draw(snap, age, now) {
     ctx.fillStyle = '#2f6fe0'; ctx.fillRect(k[0] - 10, by - 12, 20, 24); ctx.fillStyle = '#1c3f94'; ctx.fillRect(k[0] - 10, by - 12, 5, 24); ctx.fillStyle = '#fff'; ctx.fillRect(k[0] - 2, by - 6, 9, 2); ctx.fillRect(k[0] - 2, by - 1, 9, 2); ctx.strokeStyle = '#0d2260'; ctx.lineWidth = 2; ctx.strokeRect(k[0] - 10, by - 12, 20, 24);
   }
 
-  if (snap.gb) drawGoldItem(snap.gb[0], snap.gb[1], now);
   for (const p of snap.pl) if (!p.dc && !p.al && p.gx !== undefined) {   // gravestones of the defeated, in their colour
     const key = p.id + ':' + snap.rd; if (graveSeen[key] === undefined) graveSeen[key] = now;
     drawGrave(p.gx, p.gy, V[p.v], names[p.id], (now - graveSeen[key]) / 1000);
   }
+  if (snap.gb) drawGoldItem(snap.gb[0], snap.gb[1], now);   // the golden boomerang always lies on top of gravestones
 
   const real = snap.pl.filter(p => !p.dc);
   for (const o of snap.bo) if (o[2] === 2) { const own = real[o[3]]; drawBoom(o[0], o[1], 0.6, boomCol(own), 0.8); }
 
+  const look = isLook(snap);   // seeker previewing the map: nobody else is shown
   const list = snap.pl.slice().sort((a, b) => a.y - b.y);
   for (const p of list) {
+    if (look && p.id !== myId) continue;
     const [x, y] = (p.id === myId && mode === 'mp' && NET.pred) ? [NET.pred.x + NET.err.x, NET.pred.y + NET.err.y] : pos(p, age);
     if (!p.al) { if (!p.dc) { ctx.save(); ctx.globalAlpha = 0.5; ctx.fillStyle = '#fff'; ctx.font = 'bold 20px sans-serif'; ctx.textAlign = 'center'; ctx.restore(); } continue; }
     ctx.save();
     if (p.gh && snap.gm) drawGoldAura(x, y, p.gt || 0, snap.gm, now);
+    if (p.ds >= 0 && !p.dc) { drawDisguise(p.ds, x, y); ctx.restore(); continue; }   // no shadow: real props don't have one either
     ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.beginPath(); ctx.ellipse(x, y + 16, 14, 5, 0, 0, 7); ctx.fill();
-    if (p.ds >= 0 && !p.dc) { drawDisguise(p.ds, x, y); ctx.restore(); continue; }
     if (p.iv && Math.floor(now / 70) % 2) ctx.globalAlpha = 0.5;
     
     const aimAngle = (p.id === myId && haveMouse) ? lastAim : p.a;
@@ -851,6 +913,13 @@ function drawHUD(snap, me, now) {
   if (mode === 'mp' && NET.rtt && cfg.ping) { ctx.save(); ctx.textAlign = 'right'; ctx.font = 'bold 12px sans-serif'; ctx.fillStyle = NET.rtt < 60 ? '#7fe08a' : NET.rtt < 120 ? '#ffc83b' : '#ff7a6b'; ctx.fillText(Math.round(NET.rtt) + ' ms', 952, 634); ctx.restore(); }
 
   if (cfg.fps) { ctx.save(); ctx.textAlign = 'left'; ctx.font = 'bold 12px sans-serif'; ctx.fillStyle = 'rgba(255,255,255,0.8)'; ctx.fillText(fps + ' fps', 8, 634); ctx.restore(); }
+  if (isBlind(snap)) {   // the seeker sees nothing while the others hide
+    ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = '#0b0614'; ctx.fillRect(0, 0, cv.width, cv.height); ctx.restore();
+    ctx.textAlign = 'center'; ctx.lineWidth = 6; ctx.strokeStyle = '#120b1c'; ctx.fillStyle = '#ffc83b'; ctx.font = 'bold 40px sans-serif';
+    ctx.strokeText('You are the seeker', 480, 180); ctx.fillText('You are the seeker', 480, 180);
+    ctx.font = 'bold 20px sans-serif'; ctx.fillStyle = '#fff'; ctx.fillText(`Eyes closed \u2014 the hiders are hiding\u2026 ${Math.ceil(snap.hs.t)}`, 480, 225);
+    ctx.font = '15px sans-serif'; ctx.fillStyle = 'rgba(255,255,255,0.75)'; ctx.fillText('Afterwards they turn into props. Real props and players look alike \u2014 swing or throw at the ones you suspect.', 480, 450);
+  }
   const real = snap.pl.filter(p => !p.dc);
   ctx.font = 'bold 15px sans-serif'; ctx.textAlign = 'left';
   real.forEach((p, i) => {
@@ -860,7 +929,7 @@ function drawHUD(snap, me, now) {
     if (snap.gm) { ctx.font = 'bold 12px sans-serif'; ctx.fillStyle = p.gh ? '#ffe36b' : 'rgba(255,255,255,0.75)'; ctx.fillText((p.gh ? '\u2605 ' : '') + (p.gt || 0).toFixed(1) + 's', rw - 26, y); ctx.font = 'bold 15px sans-serif'; }
     ctx.textAlign = 'left';
   });
-  ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.font = '12px sans-serif'; ctx.fillText(`Round ${snap.rd} · ${(A.list[snap.ar] || {}).name || ''}`, 10, 22 + real.length * 22 + 6);
+  ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.font = '12px sans-serif'; ctx.fillText(`${snap.sd ? 'SUDDEN DEATH' : 'Round ' + snap.rd} · ${(A.list[snap.ar] || {}).name || ''}${snap.tg && !snap.sd ? ' · first to ' + snap.tg + ' win' + (snap.tg === 1 ? '' : 's') : ''}`, 10, 22 + real.length * 22 + 6);
 
   if (me) {
     const pus = me.pu || []; ctx.textAlign = 'center'; ctx.font = 'bold 13px sans-serif';
@@ -875,6 +944,25 @@ function drawHUD(snap, me, now) {
     if (me.bn) { ctx.fillStyle = '#ffb347'; ctx.font = 'bold 22px sans-serif'; ctx.fillText('ON FIRE! Find wet ground!', 480, 90); }
   }
 
+  if (snap.ph !== 'end' && !snap.pl.some(p => p.id === myId)) {   // not in this round: a spectator, or someone who missed the sudden-death cut
+    ctx.save(); ctx.textAlign = 'center'; ctx.lineWidth = 5; ctx.strokeStyle = '#120b1c'; ctx.font = 'bold 20px sans-serif'; ctx.fillStyle = '#bfe6ff';
+    const t = snap.sd ? "SPECTATING \u2014 you didn't reach the win target" : 'SPECTATING'; ctx.strokeText(t, 480, 610); ctx.fillText(t, 480, 610); ctx.restore();
+  }
+  if (snap.sd && snap.ph !== 'end') {
+    ctx.save(); ctx.textAlign = 'center'; ctx.lineWidth = 5; ctx.strokeStyle = '#120b1c'; ctx.font = 'bold 26px sans-serif'; ctx.fillStyle = '#ff7a6b';
+    const t = 'SUDDEN DEATH \u2014 Battle Royale! Last one standing wins the match'; ctx.strokeText(t, 480, 44); ctx.fillText(t, 480, 44); ctx.restore();
+  }
+  if (snap.hs && snap.ph !== 'end') {
+    const hs = snap.hs, iAmSeeker = hs.sk === myId; ctx.save(); ctx.textAlign = 'center'; ctx.lineWidth = 5; ctx.strokeStyle = '#120b1c';
+    const line = (t, y, col, f) => { ctx.font = f || 'bold 20px sans-serif'; ctx.fillStyle = col; ctx.strokeText(t, 480, y); ctx.fillText(t, 480, y); };
+    if (snap.ph === 'over') line(hs.res === 'seeker' ? `${names[hs.sk] || '?'} found everyone!` : 'The hiders win the round!', 60, '#7fe08a');
+    else if (isLook(snap) && snap.ph === 'playing') line(`Memorise the map \u2014 your screen goes dark in ${Math.ceil(hs.t - hs.bt)}\u2026`, 44, '#ffc83b');
+    else if (hs.ph === 'hide' && !isBlind(snap)) line(`Hide! You'll turn into a prop in ${Math.ceil(hs.t)}\u2026`, 44, '#ffc83b');
+    else if (hs.ph === 'seek') line(`${iAmSeeker ? 'Find the hiders' : 'Stay hidden'}: ${Math.ceil(hs.t)}s`, 44, '#ffc83b');
+    if (hs.ph === 'seek' || snap.ph === 'over') line(`Seeker: ${names[hs.sk] || '?'}` + (hs.u < 0 ? ' \u00b7 unlimited swings/throws' : ` \u00b7 ${hs.u} swing/throw${hs.u === 1 ? '' : 's'} left`), 70, iAmSeeker && hs.u >= 0 && hs.u <= 3 ? '#ff9c8f' : '#fff', 'bold 15px sans-serif');
+    if (!iAmSeeker && hs.ph === 'seek' && snap.ph === 'playing' && me && me.al) line(me.ds >= 0 ? 'You look like a prop. Keep still!' : 'Stand still to turn back into a prop', 96, '#bfe6ff', 'bold 15px sans-serif');
+    ctx.restore();
+  }
   announcements = announcements.filter(a => now - a.t0 < a.life);
   let annY = 130;
   for (const a of announcements) {
@@ -887,10 +975,10 @@ function drawHUD(snap, me, now) {
 
   ctx.textAlign = 'center';
   const big = (txt, y, col) => { ctx.font = 'bold 64px sans-serif'; ctx.lineWidth = 8; ctx.strokeStyle = '#120b1c'; ctx.fillStyle = col || '#ffc83b'; ctx.strokeText(txt, 480, y); ctx.fillText(txt, 480, y); };
-  if (snap.ph === 'countdown') { big(String(Math.ceil(snap.tm)), 330); ctx.font = 'bold 20px sans-serif'; ctx.fillStyle = '#fff'; ctx.fillText(`Round ${snap.rd}`, 480, 270); if (snap.gm) { ctx.fillStyle = '#ffe36b'; ctx.fillText(`Grab the Golden Boomerang and hold it for ${snap.gm} seconds to win the round!`, 480, 390); } }
-  else if (snap.ph === 'over') big(snap.w ? `${names[snap.w] || '?'} wins the round!` : 'Draw!', 330);
-  else if (snap.ph === 'end') { big(`${names[snap.ch] || '?'} wins the match!`, 320, '#7fe08a'); ctx.font = 'bold 20px sans-serif'; ctx.fillStyle = '#fff'; ctx.fillText('Returning to ' + (mode === 'mp' ? 'lobby' : 'menu') + '…', 480, 370); }
-  if (cfg.hints && performance.now() - hintT < 12000 && snap.ph !== 'end') { ctx.font = '13px sans-serif'; ctx.fillStyle = 'rgba(255,255,255,0.75)'; ctx.fillText('WASD move · aim mouse · hold + release click to throw' + (curSet.pullBack ? ' · hold click to pull back' : ' · walk over boomerangs to pick them up') + ' · right-click slash · Space dash', 480, 586); }
+  if (snap.ph === 'countdown') { big(String(Math.ceil(snap.tm)), 330); ctx.font = 'bold 20px sans-serif'; ctx.fillStyle = '#fff'; ctx.fillText(`Round ${snap.rd}`, 480, 270); if (snap.hs) { ctx.fillStyle = '#ffc83b'; ctx.fillText(`${names[snap.hs.sk] || '?'} is the seeker \u2014 everyone else, get ready to hide!`, 480, 390); } if (snap.gm) { ctx.fillStyle = '#ffe36b'; ctx.fillText(`Grab the Golden Boomerang and hold it for ${snap.gm} seconds to win the round!`, 480, 390); } }
+  else if (snap.ph === 'over') { if (!snap.hs) big(snap.w ? `${names[snap.w] || '?'} wins the round!` : 'Draw!', 330); }
+  else if (snap.ph === 'end') { big(snap.ch ? `${names[snap.ch] || '?'} wins the match!` : "It's a tie!", 320, '#7fe08a'); ctx.font = 'bold 20px sans-serif'; ctx.fillStyle = '#fff'; ctx.fillText('Returning to ' + (mode === 'mp' ? 'lobby' : 'menu') + '…', 480, 370); }
+  if (cfg.hints && performance.now() - hintT < 12000 && snap.ph !== 'end' && !isBlind(snap)) { ctx.font = '13px sans-serif'; ctx.fillStyle = 'rgba(255,255,255,0.75)'; ctx.fillText('WASD move · aim mouse · hold + release click to throw' + (curSet.pullBack ? ' · hold click to pull back' : ' · walk over boomerangs to pick them up') + ' · right-click slash · Space dash', 480, 586); }
 }
 
 // ---------- main loop ----------
@@ -927,4 +1015,4 @@ setInterval(() => { if (mode === 'mp') wsSend({ t: 'ping', c: performance.now() 
 if (/[?&]debug\b/.test(location.search)) window.__mg = { net: NET };
 requestAnimationFrame(frame);
 show('menu');
-})();
+})();

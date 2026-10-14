@@ -41,6 +41,8 @@ WebSocket upgrades (the client uses `wss://` automatically on https pages). Ngin
 - **Esc / Menu button**: in single player the game pauses. Online, the same menu opens but the match keeps running and your
   fish stands still (and can be hit), so close it quickly. The menu lists everyone playing with their gum, and has
   Resume, Settings and Leave game (asks for a second click).
+- **Spectators**: tick *Join online rooms as a spectator* on the main menu before creating or joining a room (or press *Spectate instead* / *Play instead* in the lobby). Spectators don't take a slot (up to 8 per room), never play, and can even join a match that is already running. Players who miss the cut for a Hide & Seek sudden death watch it the same way.
+- **Hitbox**: gums now squeeze through gaps with a smaller collision circle against walls and obstacles (radius 9, `R_WALL` in `shared/game.js`), but are still hit by boomerangs, slashes and explosions with the original size (`R_P` = 14).
 - **Gravestones**: a defeated gum leaves a gravestone in its colour for the rest of the round, on the nearest solid ground
   if it fell into water, a pit or out of bounds.
 
@@ -66,6 +68,17 @@ WebSocket upgrades (the client uses `wss://` automatically on https pages). Ngin
   stops and waits on the ground until its owner walks over it.
 - Options tied to a scoring mode only appear when that mode is selected (e.g. *Golden holder can throw it* only for Golden
   Boomerang; the target field reads "Kills to win" in Point-per-kill mode).
+- **Hide & Seek** (Scoring mode): each player takes one turn as the seeker (round 1 = first player, and so on). The seeker's screen is
+  blacked out for 10 s while everyone else hides, using the Disguise power-up they are given (hiders have no boomerang and cannot
+  attack). After 10 s every hider turns into a prop from the current map and the seeker has to work out which props are really
+  players. The hiders win the round if they stay hidden until the timer ends (*Hiders win after*, default 60 s); the seeker wins by
+  finding everyone. Scoring is by round wins: the seeker wins a round (1 point) by finding everyone, and every hider still hidden when the timer ends wins the round (1 point each). The first to reach *Wins needed to win the match* (default 3) takes the match. Seekers keep rotating round after round until someone gets there. If several players reach the target in the same round they go to **sudden death**: a normal free-for-all round with the Battle Royale power-up already active from the start (the arena begins shrinking immediately); last one standing wins the match, and a draw just replays it. Everyone who did not reach the target spectates the sudden-death round. *Seeker melee + throw limit*
+  (default 12) caps swings and throws; each hider found gives back 3 uses; 0 = unlimited. Out of uses = hiders win. The seeker first gets 6 s to look at the empty map (no other player is shown),
+  then the screen goes dark for the remaining 4 s of hiding. Hide & Seek has its own hand-built, asymmetric maps (Old Orchard, Boulder Canyon, Ruined Temple, Dockside, Hedge Gardens, Village Market:
+  paths, buildings, groves, rubble and dozens of 30x30 props that hiders can copy) plus five shared standard maps (Dunes A/B, Chaos Garden,
+  Wet Woods, Hedge Maze). The map picker only lists the maps that suit the selected mode. Blue books, power-up carry-over and the shrinking arena are off in this mode. Gums pass through each other (no pushing) and a hider needs only half a second of standing still to turn into a prop. Computer-controlled seekers and hiders find their way round obstacles with a small A* path-finder instead of bumping into them. A boomerang that lands somewhere nobody could stand, or outside the play area, goes straight back to its owner.
+- Computer players that are stuck without their boomerang walk straight over to it (or to a nearby blue book). Picking up a blue book
+  also returns any of your boomerangs that are out.
 - **Golden holder can throw it** (default off = melee only): the carrier's boomerang is always gold, whatever their gum.
   With throwing allowed, the hold timer pauses while the boomerang is out of their hand. With melee only, left click, right
   click and K all slash.

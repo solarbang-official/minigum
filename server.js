@@ -54,18 +54,18 @@ function newCode() {
 }
 function cleanName(n) { return String(n || 'Player').replace(/[^\w \-.!?]/g, '').trim().slice(0, 14) || 'Player'; }
 function freeVariant(room, want) {
-  const used = new Set([...room.clients.values()].map(c => c.variant));
+  const used = new Set([...room.clients.values()].filter(c => !c.spec).map(c => c.variant));
   if (Number.isInteger(want) && want >= 0 && want < G.VARIANTS.length && !used.has(want)) return want;
   for (let i = 0; i < G.VARIANTS.length; i++) if (!used.has(i)) return i;
   return 0;
 }
 function roomInfo(room) {
   return { t: 'room', code: room.code, hostId: room.host, inGame: !!room.match, settings: room.settings,
-    players: [...room.clients.values()].map(c => ({ id: c.id, name: c.name, variant: c.variant })) };
+    players: [...room.clients.values()].map(c => ({ id: c.id, name: c.name, variant: c.variant, spec: !!c.spec })) };
 }
 
 function startMatch(room) {
-  const humans = [...room.clients.values()].map(c => ({ id: c.id, name: c.name, variant: c.variant }));
+  const humans = [...room.clients.values()].filter(c => !c.spec).map(c => ({ id: c.id, name: c.name, variant: c.variant }));
   let nb = Math.min(room.settings.bots, 6 - humans.length);
   if (humans.length + nb < 2) nb = 2 - humans.length;
   const infos = G.fillBots(humans, nb);
@@ -106,14 +106,19 @@ function leaveRoom(c) {
   c.room = null; room.clients.delete(c.id);
   if (room.clients.size === 0) { clearTimeout(room.timer); room.match = null; rooms.delete(room.code); return; }
   if (room.host === c.id) room.host = room.clients.keys().next().value;
-  if (room.match) room.match.replaceWithBot(c.id);
+  if (room.match && !c.spec) room.match.replaceWithBot(c.id);
   broadcast(room, roomInfo(room));
 }
+
+const MAX_PLAYERS = 6, MAX_SPECTATORS = 8;
+const playerCount = room => [...room.clients.values()].filter(c => !c.spec).length;
+const specCount = room => room.clients.size - playerCount(room);
 
 function joinRoom(c, room) {
   c.room = room; c.variant = freeVariant(room, c.variant);
   room.clients.set(c.id, c);
   send(c.ws, roomInfo(room)); broadcast(room, roomInfo(room));
+  if (room.match && c.spec) send(c.ws, { t: 'start', infos: room.match.infos, settings: room.settings, spec: true });   // spectators can drop into a match that is already running
 }
 
 wss.on('connection', ws => {
@@ -136,21 +141,31 @@ wss.on('connection', ws => {
       case 'ping': send(ws, { t: 'pong', c: +m.c || 0 }); break;   // answered immediately, outside the game loop
       case 'create': case 'join': {
         if (c.room) return;
-        c.name = cleanName(m.name); c.variant = Number.isInteger(m.variant) ? m.variant : 0;
+        c.name = cleanName(m.name); c.variant = Number.isInteger(m.variant) ? m.variant : 0; c.spec = !!m.spec;
         if (m.t === 'create') {
           const room = { code: newCode(), host: c.id, clients: new Map(), settings: G.sanitizeSettings({ bots: 0 }), match: null };
           rooms.set(room.code, room); joinRoom(c, room);
         } else {
           const room = rooms.get(String(m.code || '').toUpperCase().trim());
           if (!room) return send(ws, { t: 'err', m: 'Room not found' });
-          if (room.match) return send(ws, { t: 'err', m: 'Match already in progress' });
-          if (room.clients.size >= 6) return send(ws, { t: 'err', m: 'Room is full' });
+          if (c.spec) { if (specCount(room) >= MAX_SPECTATORS) return send(ws, { t: 'err', m: 'No more spectator spots' }); }
+          else {
+            if (room.match) return send(ws, { t: 'err', m: 'Match already in progress (you can join as a spectator)' });
+            if (playerCount(room) >= MAX_PLAYERS) return send(ws, { t: 'err', m: 'Room is full (you can join as a spectator)' });
+          }
           joinRoom(c, room);
         }
         break;
       }
+      case 'spec': {   // switch between playing and spectating in the lobby
+        const r = c.room; if (!r || r.match) return;
+        const want = !!m.on; if (want === !!c.spec) return;
+        if (want) { if (specCount(r) >= MAX_SPECTATORS) return send(ws, { t: 'err', m: 'No more spectator spots' }); c.spec = true; }
+        else { if (playerCount(r) >= MAX_PLAYERS) return send(ws, { t: 'err', m: 'Room is full' }); c.spec = false; c.variant = freeVariant(r, c.variant); }
+        broadcast(r, roomInfo(r)); break;
+      }
       case 'settings': { const r = c.room; if (!r || r.host !== c.id || r.match) return; r.settings = G.sanitizeSettings(m.settings); broadcast(r, roomInfo(r)); break; }
-      case 'variant': { const r = c.room; if (!r || r.match) return; const used = [...r.clients.values()].some(o => o !== c && o.variant === m.v); if (Number.isInteger(m.v) && m.v >= 0 && m.v < G.VARIANTS.length && !used) { c.variant = m.v; broadcast(r, roomInfo(r)); } break; }
+      case 'variant': { const r = c.room; if (!r || r.match) return; if (c.spec) return; const used = [...r.clients.values()].some(o => o !== c && !o.spec && o.variant === m.v); if (Number.isInteger(m.v) && m.v >= 0 && m.v < G.VARIANTS.length && !used) { c.variant = m.v; broadcast(r, roomInfo(r)); } break; }
       case 'start': { const r = c.room; if (!r || r.host !== c.id || r.match) return; startMatch(r); break; }
       case 'leave': leaveRoom(c); break;
     }

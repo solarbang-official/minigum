@@ -6,14 +6,15 @@ const W = 960, H = 640;
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 const rnd = v => Math.round(v * 10) / 10;
 
-const R_P = 14, SPEED = 200, DASH_SP = 560, DASH_T = 0.18, DASH_CD = 1.0;
+const R_P = 14, R_WALL = 9, SPEED = 200, DASH_SP = 560, DASH_T = 0.18, DASH_CD = 1.0;
 const B_OUT = 0.6, B_RET = 620, B_R = 7, TK_R = 260, EXPL_R = 80;
 const SLASH_T = 0.22;
-const DT = 1 / 60;
-const BOUNCE_MAX = 3, BOUNCE_SPEED = 0.5;
+const DT = 1 / 60;                          // fixed simulation step: server, offline single-player and client prediction all use it
+const BOUNCE_MAX = 3, BOUNCE_SPEED = 0.5;   // a boomerang can bounce off walls 3 times, losing half its speed each time, then stops at the next wall
 
-const HOMING_TURN = 1.2;
-const GOLD_TIME = 14, RESPAWN_TIME = 3, GOLD_OFF = ['explosive', 'multi', 'fire', 'ice', 'telekinesis', 'teleport'];
+const HOMING_TURN = 1.2;   // rad/s a homing boomerang can curve
+const HIDE_PREP = 10, HIDE_LOOK = 6, HIDE_REFUND = 3;   // hide & seek: seconds the hiders get to hide, and the uses a seeker earns for finding someone
+const GOLD_TIME = 14, RESPAWN_TIME = 3, GOLD_OFF = ['explosive', 'multi', 'fire', 'ice', 'telekinesis', 'teleport'];   // golden boomerang mode: hold it 14 s (total) to win; boomerang power-ups are off while you carry it
 const B_SPEEDS = { slow: 380, normal: 520, fast: 700, insane: 900 };
 
 const PU_IDS = ['caffeinated', 'dashwall', 'teleport', 'explosive', 'multi', 'extra', 'fire', 'ice', 'disguise', 'shield', 'battleroyale', 'telekinesis', 'decoy', 'bamboozled'];
@@ -53,19 +54,22 @@ function sanitizeSettings(s) {
   s = s || {}; const o = {};
   const all = A.list.map((_, i) => i);
   if (Array.isArray(s.arenas)) o.arenas = [...new Set(s.arenas.map(Number).filter(i => Number.isInteger(i) && i >= 0 && i < A.list.length))].sort((a, b) => a - b);
-  else if (Number.isInteger(s.arena) && s.arena >= 0 && s.arena < A.list.length) o.arenas = [s.arena];
+  else if (Number.isInteger(s.arena) && s.arena >= 0 && s.arena < A.list.length) o.arenas = [s.arena];   // older single-map setting
   else o.arenas = all;
-  if (o.arenas.length === 0) o.arenas = all;
-  o.mode = ['kill', 'golden'].includes(s.mode) ? s.mode : 'last';
+  if (o.arenas.length === 0) o.arenas = all;   // nothing ticked = every map
+  o.mode = ['kill', 'golden', 'hide'].includes(s.mode) ? s.mode : 'last';
   o.target = clamp(parseInt(s.target) || 5, 1, 25);
   o.books = ['off', 'slow', 'normal', 'fast'].includes(s.books) ? s.books : 'normal';
   o.boomSpeed = ['slow', 'normal', 'fast', 'insane'].includes(s.boomSpeed) ? s.boomSpeed : 'normal';
   o.underdog = !!s.underdog;
-  o.bounce = s.bounce === undefined ? true : !!s.bounce;
-  o.pullBack = !!s.pullBack;
-  o.homing = !!s.homing;
-  o.goldThrow = !!s.goldThrow;
-  o.puCarry = !!s.puCarry;
+  o.bounce = s.bounce === undefined ? true : !!s.bounce;   // boomerangs bounce off walls by default
+  o.pullBack = !!s.pullBack;     // hold the throw button to pull dropped boomerangs back (otherwise walk over them)
+  o.homing = !!s.homing;         // thrown boomerangs arc slightly towards enemies
+  o.goldThrow = !!s.goldThrow;   // golden boomerang mode: may the holder throw it? (off = melee only)
+  const ht = parseInt(s.hideTime); o.hideTime = Number.isNaN(ht) ? 60 : clamp(ht, 10, 600);   // hide & seek: seconds the hiders must survive
+  const hu = parseInt(s.hideUses); o.hideUses = Number.isNaN(hu) ? 12 : clamp(hu, 0, 99);   // hide & seek: seeker melee + throw limit (0 = unlimited)
+  const hw = parseInt(s.hideWins); o.hideWins = Number.isNaN(hw) ? 3 : clamp(hw, 1, 25);   // hide & seek: round wins needed to win the match
+  o.puCarry = !!s.puCarry;       // power-ups carry over into the next round
   const ai = parseInt(s.ai); o.ai = Number.isNaN(ai) ? 1 : clamp(ai, 0, 2);
   const b = parseInt(s.bots); o.bots = Number.isNaN(b) ? 0 : clamp(b, 0, 5);
   if (Array.isArray(s.pus)) {
@@ -92,21 +96,24 @@ function fillBots(humans, n) {
 
 function newB(p) { return { o: p, x: p.x, y: p.y, vx: 0, vy: 0, s: 'held', t: 0, fuse: -1, temp: false, td: 0, ctl: false, dfl: null, dflT: 0, bn: 0, sp: 1 }; }
 
+// ---- shared movement helpers (the server and the client's prediction must agree exactly) ----
 function wallHitA(arena, x, y, r) { for (const q of arena.walls) if (A.circleRect(x, y, r, q)) return true; return false; }
 function pushOutOf(arena, o) {
   for (let d = 4; d < 260; d += 6) for (let j = 0; j < 12; j++) {
     const x = o.x + Math.cos(j * Math.PI / 6) * d, y = o.y + Math.sin(j * Math.PI / 6) * d;
-    if (A.freeAt(arena, x, y, R_P)) { o.x = x; o.y = y; return; }
+    if (A.freeAt(arena, x, y, R_WALL)) { o.x = x; o.y = y; return; }
   }
 }
 function moveCircle(arena, o, dx, dy, ghost) {
   if (ghost) { o.x += dx; o.y += dy; }
   else {
-    const nx = o.x + dx; if (!wallHitA(arena, nx, o.y, R_P - 1)) o.x = nx;
-    const ny = o.y + dy; if (!wallHitA(arena, o.x, ny, R_P - 1)) o.y = ny;
+    const nx = o.x + dx; if (!wallHitA(arena, nx, o.y, R_WALL)) o.x = nx;
+    const ny = o.y + dy; if (!wallHitA(arena, o.x, ny, R_WALL)) o.y = ny;
   }
   o.x = clamp(o.x, 4, W - 4); o.y = clamp(o.y, 4, H - 4);
 }
+// Client-side prediction of the local player's walking and dashing for one command.
+// Mirrors Round.stepPlayer; state s = { x, y, dashT, ddx, ddy, dashCd, frozen, tk, bam, ice, caff, dwall, tpOut }.
 function predictStep(arena, s, c, dt) {
   s.dashCd = Math.max(0, s.dashCd - dt);
   let mx = clamp(c.mx, -1, 1), my = clamp(c.my, -1, 1); const ml = Math.hypot(mx, my);
@@ -125,12 +132,12 @@ function predictStep(arena, s, c, dt) {
     else if (!s.tk) { vx = mx * sp; vy = my * sp; }
   }
   moveCircle(arena, s, vx * dt, vy * dt, dashing && s.dwall);
-  if (!(s.dashT > 0) && wallHitA(arena, s.x, s.y, R_P - 3)) pushOutOf(arena, s);
+  if (!(s.dashT > 0) && wallHitA(arena, s.x, s.y, R_WALL - 2)) pushOutOf(arena, s);
   return s;
 }
 
 class Round {
-  constructor(idx, infos, scores, set, savedPUs) {
+  constructor(idx, infos, scores, set, savedPUs, seekerId, suddenDeath) {
     this.idx = idx; const a = this.arena = A.list[idx]; this.set = set; this.scores = scores;
     this.bSpeed = B_SPEEDS[set.boomSpeed] || 520;
     this.bounds = Object.assign({}, a.bounds); this.target = null;
@@ -156,9 +163,25 @@ class Round {
     });
 
     if (this.golden) { const sp = this.freeSpot(480, 320); this.gold = { x: sp[0], y: sp[1], holder: null }; }
+    this.hs = null; this.sd = !!suddenDeath;
+    if (this.sd) this.shrink(this.bounds.x + this.bounds.w / 2, this.bounds.y + this.bounds.h / 2, 0.6);   // sudden death: Battle Royale is active from the very start
+    if (set.mode === 'hide') {
+      const sk = this.players.find(q => q.id === seekerId) || this.players[0];
+      this.hs = { seeker: sk.id, ph: 'hide', t: HIDE_PREP, left: set.hideTime, unl: set.hideUses === 0, res: null };
+      const nv = this.navInit();   // nobody starts sealed into a pocket the bots could never leave
+      for (const p of this.players) {
+        const ci = Math.floor(p.x / nv.cs), cj = Math.floor(p.y / nv.cs);
+        if (nv.comp[Math.max(0, Math.min(nv.gw - 1, ci)) * nv.gh + Math.max(0, Math.min(nv.gh - 1, cj))] !== nv.main) { const w = this.navRandom(p.x, p.y, 0); if (w) { p.x = w[0]; p.y = w[1]; } }
+      }
+      for (const p of this.players) {
+        p.pu = [];
+        if (p === sk) { p.uses = set.hideUses; }
+        else { p.pu = ['disguise']; p.boom = []; }   // hiders get the Disguise power-up and no boomerang
+      }
+    }
 
     for (const p of this.players) {
-      if (p.pu.length > 0) {
+      if (p.pu.length > 0 && !this.hs) {
         for (const puId of p.pu) {
           this.ev('pu_ann', p.id, p.name, puId, 'start');
         }
@@ -167,6 +190,10 @@ class Round {
   }
 
   ev(...a) { this.events.push(a); }
+  isSeeker(p) { return !!this.hs && p.id === this.hs.seeker; }
+  seekerCan(p) { return !this.isSeeker(p) || this.hs.unl || p.uses > 0; }
+  spend(p) { if (this.isSeeker(p) && !this.hs.unl) p.uses = Math.max(0, p.uses - 1); }
+  disguiseNow(p) { const ks = this.arena.kinds.length ? this.arena.kinds : ['rock']; p.disg = A.KINDS.indexOf(ks[Math.floor(Math.random() * ks.length)]); p.still = 1; }
   has(p, id) { return p.pu.includes(id) && !(p.gold && GOLD_OFF.includes(id)); }
 
   wallHit(x, y, r) { return wallHitA(this.arena, x, y, r); }
@@ -198,6 +225,7 @@ class Round {
     if (si >= 0) { t.pu.splice(si, 1); t.invuln = 0.9; this.ev('sh', t.x, t.y); if (cause === 'fire') t.burn = 0; return; }
     this.kill(t, by, cause);
   }
+  // where a defeated gum's gravestone stands: where it fell, or the nearest solid ground if it fell into water, a pit or out of bounds
   placeGrave(p) {
     const ok = (x, y) => A.freeAt(this.arena, x, y, R_P) && !this.deadlyR(x, y, R_P) && this.inBounds(x, y, 16);
     if (ok(p.x, p.y)) { p.gx = p.x; p.gy = p.y; return; }
@@ -207,6 +235,7 @@ class Round {
     }
     p.gx = p.x; p.gy = p.y;
   }
+  // nearest open ground to (x, y), inside the play area
   freeSpot(x, y) {
     const ok = (px, py) => A.freeAt(this.arena, px, py, 20, this.bounds) && !this.deadlyR(px, py, 20);
     if (ok(x, y)) return [x, y];
@@ -216,12 +245,13 @@ class Round {
     }
     return [480, 320];
   }
+  // golden boomerang mode: a defeated gum comes back at a random spot after a few seconds
   respawn(p) {
     let spot = null;
     for (let tries = 0; tries < 80 && !spot; tries++) {
       const b = this.bounds, x = b.x + 30 + Math.random() * (b.w - 60), y = b.y + 30 + Math.random() * (b.h - 60);
       if (!A.freeAt(this.arena, x, y, 20, b) || this.deadlyR(x, y, 22)) continue;
-      const far = tries < 50 ? 150 : 60;
+      const far = tries < 50 ? 150 : 60;   // prefer a spot away from everyone, but don't insist
       if (this.players.some(q => q !== p && q.alive && Math.hypot(q.x - x, q.y - y) < far)) continue;
       spot = [x, y];
     }
@@ -231,12 +261,32 @@ class Round {
     p.boom.push(newB(p)); delete p.gx; delete p.gy;
     this.ev('resp', p.x, p.y);
   }
+  // hide & seek: 10 s to hide, then the seeker hunts until the hiders' timer runs out
+  stepHide(dt) {
+    const hs = this.hs; if (!hs || this.over) return;
+    const sk = this.players.find(p => p.id === hs.seeker), hiders = this.players.filter(p => p !== sk);
+    if (hs.ph === 'hide') {
+      hs.t -= dt;
+      if (hs.t <= 0) { hs.ph = 'seek'; hs.t = 0; for (const p of hiders) if (p.alive) this.disguiseNow(p); this.ev('hs_go'); }
+      return;
+    }
+    hs.left -= dt;
+    const finish = (res) => {
+      this.over = true; hs.res = res; hs.left = Math.max(0, hs.left);
+      if (res === 'seeker') { this.winner = sk; this.scores[sk.id] = (this.scores[sk.id] || 0) + 1; }   // the seeker found everyone: one round win
+      else for (const p of hiders) if (p.alive) this.scores[p.id] = (this.scores[p.id] || 0) + 1;   // each hider still hidden wins the round
+    };
+    if (hiders.length === 0 || this.players.length < 2) return;
+    if (!hiders.some(p => p.alive)) finish('seeker');
+    else if (!sk.alive || hs.left <= 0) finish('hiders');
+    else if (!hs.unl && sk.uses <= 0 && sk.boom.every(b => b.s === 'held')) finish('hiders');   // out of throws and swings
+  }
   stepGold(dt) {
     const g = this.gold; if (!g || this.over) return;
     if (!g.holder) {
       for (const p of this.players) if (p.alive && Math.hypot(p.x - g.x, p.y - g.y) < 26) { g.holder = p; p.gold = true; p.disg = -1; for (const b of p.boom.slice()) if (b.s !== 'held') this.catchB(p, b); this.ev('gold', p.x, p.y); break; }
     } else if (g.holder.alive) {
-      const h = g.holder; if (h.boom.some(b => b.s === 'held' && !b.temp)) h.goldT += dt;
+      const h = g.holder; if (h.boom.some(b => b.s === 'held' && !b.temp)) h.goldT += dt;   // counts while the golden boomerang is in your hand
       if (h.goldT >= GOLD_TIME) { h.goldT = GOLD_TIME; this.over = true; this.winner = h; }
     }
   }
@@ -249,6 +299,10 @@ class Round {
     }
     this.ev('die', p.x, p.y, cause === 'drop' || cause === 'oob' ? 1 : 0);
     for (const b of p.boom) if (b.s !== 'held') { b.s = 'drop'; b.vx = b.vy = 0; b.fuse = -1; b.dfl = null; }
+    if (this.hs && by && this.isSeeker(by) && p !== by && cause !== 'drop' && cause !== 'oob') {
+      if (!this.hs.unl) by.uses += HIDE_REFUND;
+      this.ev('found', p.x, p.y);
+    }
     if (by && by !== p && cause !== 'drop' && cause !== 'oob' && !this.over && this.set.mode === 'kill') this.scores[by.id] = (this.scores[by.id] || 0) + 1;
   }
   launch(p, b, ang) {
@@ -258,16 +312,17 @@ class Round {
   }
   doThrow(p) {
     const held = p.boom.filter(b => b.s === 'held' && !b.temp);
-    if (!held.length) return;
+    if (!held.length) return false;
     const multi = this.has(p, 'multi');
-    if (multi && p.boom.some(b => b.s !== 'held')) return;
+    if (multi && p.boom.some(b => b.s !== 'held')) return false;
     const b = held[0]; this.launch(p, b, p.aim);
     if (this.has(p, 'explosive')) b.fuse = 1.15;
     if (multi) for (const off of [-0.5, -0.25, 0.25, 0.5]) { const c = newB(p); c.temp = true; p.boom.push(c); this.launch(p, c, p.aim + off); }
     p.disg = -1; p.still = 0; this.ev('th', p.x, p.y);
+    return true;
   }
   doSlash(p) {
-    if (!p.boom.some(b => b.s === 'held')) return;
+    if (!p.boom.some(b => b.s === 'held')) return false;
     p.slash = SLASH_T; p.slashCd = 0.45; p.disg = -1; p.still = 0;
     this.ev('sl', p.x, p.y);
     for (const t of this.targets()) {
@@ -277,12 +332,13 @@ class Round {
       let da = Math.atan2(dy, dx) - p.aim; da = Math.atan2(Math.sin(da), Math.cos(da));
       if (Math.abs(da) < 1.3 || d < 22) this.hit(t, p, 'melee');
     }
+    return true;
   }
   doDash(p, mx, my) {
     if (this.has(p, 'teleport')) {
       const b = p.boom.find(q => q.s !== 'held' && !q.temp);
       if (b) {
-        if (!this.wallHit(b.x, b.y, R_P - 2)) {
+        if (!this.wallHit(b.x, b.y, R_WALL)) {
           this.ev('tp', p.x, p.y, b.x, b.y);
           p.x = b.x; p.y = b.y; p.dashCd = DASH_CD;
           b.fuse = -1; b.s = 'held';
@@ -308,8 +364,22 @@ class Round {
     b.x = d.x + Math.cos(d.aim) * 40; b.y = d.y + Math.sin(d.aim) * 40;
     this.ev('defl', b.x, b.y);
   }
+  // a boomerang that can't get back lands where it is (and comes straight back to hand if that is over water, a pit or off screen)
+  // a landed boomerang is nudged out of any gap too tight for a gum to reach, so its owner can always walk over and pick it up
+  settle(b) {
+    const a = this.arena;
+    if (!this.inBounds(b.x, b.y, 2) && b.o) { this.catchB(b.o, b); return; }   // landed outside the play area: straight back to its owner
+    if (this.deadly(b.x, b.y)) return;
+    const ok = (x, y) => A.freeAt(a, x, y, R_WALL) && this.inBounds(x, y, R_P) && !this.deadlyR(x, y, R_P);
+    if (ok(b.x, b.y)) return;
+    for (let d = 4; d <= 56; d += 4) for (let j = 0; j < 12; j++) {
+      const x = b.x + Math.cos(j * Math.PI / 6) * d, y = b.y + Math.sin(j * Math.PI / 6) * d;
+      if (ok(x, y) && !this.blocked(b.x, b.y, x, y)) { b.x = x; b.y = y; return; }
+    }
+    if (b.o) this.catchB(b.o, b);   // nowhere a gum could ever stand to pick it up: it goes back to its owner
+  }
   waitB(b) {
-    b.s = 'drop'; b.vx = b.vy = 0; b.dfl = null; this.ev('thud', b.x, b.y);
+    b.s = 'drop'; b.vx = b.vy = 0; b.dfl = null; this.settle(b); this.ev('thud', b.x, b.y);
     if (this.deadly(b.x, b.y) || b.x < 2 || b.y < 2 || b.x > W - 2 || b.y > H - 2) this.catchB(b.o, b);
   }
   catchB(p, b) {
@@ -351,7 +421,7 @@ class Round {
   }
   spawnDecoy(p) {
     const d = { id: 'dc' + (this.dcN++), dc: true, owner: p, x: p.x + 30, y: p.y, vx: 0, vy: 0, alive: true, variant: p.variant, aim: p.aim, dir: Math.random() * 6.28, wt: 0, life: 45 };
-    if (!A.freeAt(this.arena, d.x, d.y, R_P)) this.pushOut(d);
+    if (!A.freeAt(this.arena, d.x, d.y, R_WALL)) this.pushOut(d);
     this.decoys.push(d); this.ev('pk', d.x, d.y);
   }
   spawnBook() {
@@ -364,15 +434,15 @@ class Round {
 
   moveP(o, dx, dy, ghost) { moveCircle(this.arena, o, dx, dy, ghost); }
 
-stepPlayer(p, dt) {
+  stepPlayer(p, dt) {
     const inp = p.input;
     p.invuln = Math.max(0, p.invuln - dt); p.dashCd = Math.max(0, p.dashCd - dt); p.slashCd = Math.max(0, p.slashCd - dt);
     p.slash = Math.max(0, p.slash - dt); p.iceImm = Math.max(0, p.iceImm - dt); if (p.bam > 0) p.bam -= dt;
     let mx = clamp(inp.mx, -1, 1), my = clamp(inp.my, -1, 1); const ml = Math.hypot(mx, my);
     if (ml > 1) { mx /= ml; my /= ml; }
     if (p.bam > 0) { mx = -mx; my = -my; }
-    const aT = inp.t, aM = inp.m, aD = inp.d, aR = inp.r; inp.t = inp.m = inp.d = inp.r = false;
-    p.recalling = aR;   // Track active recall button press state
+    let aT = inp.t, aM = inp.m, aD = inp.d, aR = inp.r; inp.t = inp.m = inp.d = inp.r = false;
+    if (this.hs && this.isSeeker(p) && this.hs.ph === 'hide') { mx = my = 0; aT = aM = aD = aR = false; }   // the seeker waits, blindfolded, while the others hide
     p.aim = inp.aim;
     let dashing = p.dashT > 0;
     p.tk = false; p.tkx = 0; p.tky = 0;
@@ -384,13 +454,13 @@ stepPlayer(p, dt) {
       const tk = this.has(p, 'telekinesis') && inp.dh && p.boom.some(b => b.s !== 'held' && Math.hypot(b.x - p.x, b.y - p.y) < TK_R);
       p.tk = tk;
       if (aR && this.set.pullBack) for (const b of p.boom) if (b.s === 'drop' || b.s === 'fly') { b.s = 'ret'; }
-      if (aT && !(p.gold && !this.set.goldThrow)) this.doThrow(p);
-      if (aM && p.slashCd <= 0) this.doSlash(p);
+      if (aT && !(p.gold && !this.set.goldThrow) && this.seekerCan(p) && this.doThrow(p)) this.spend(p);
+      if (aM && p.slashCd <= 0 && this.seekerCan(p) && this.doSlash(p)) this.spend(p);
       if (aD && !tk && p.dashCd <= 0 && !dashing) this.doDash(p, mx, my);
       dashing = p.dashT > 0;
       if (tk) { p.tkx = mx; p.tky = my; }
       if (this.has(p, 'disguise') && mx === 0 && my === 0 && !dashing && !aT && !aM) {
-        p.still += dt; if (p.still >= 1 && p.disg < 0) { const ks = this.arena.kinds.length ? this.arena.kinds : ['rock']; p.disg = A.KINDS.indexOf(ks[Math.floor(Math.random() * ks.length)]); }
+        p.still += dt; if (p.still >= (this.hs ? 0.5 : 1) && p.disg < 0) { const ks = this.arena.kinds.length ? this.arena.kinds : ['rock']; p.disg = A.KINDS.indexOf(ks[Math.floor(Math.random() * ks.length)]); }
       } else { p.still = 0; p.disg = -1; }
       const sp = SPEED * (this.has(p, 'caffeinated') ? 1.45 : 1) * (p.onIce ? 0.5 : 1);
       if (dashing) { vx = p.ddx * DASH_SP; vy = p.ddy * DASH_SP; p.dashT -= dt; }
@@ -399,7 +469,7 @@ stepPlayer(p, dt) {
     const ox = p.x, oy = p.y;
     this.moveP(p, vx * dt, vy * dt, dashing && this.has(p, 'dashwall'));
     p.vx = (p.x - ox) / dt; p.vy = (p.y - oy) / dt;
-    if (!(p.dashT > 0) && this.wallHit(p.x, p.y, R_P - 3)) this.pushOut(p);
+    if (!(p.dashT > 0) && this.wallHit(p.x, p.y, R_WALL - 2)) this.pushOut(p);
 
     if (!(p.dashT > 0) && this.deadly(p.x, p.y)) { this.kill(p, null, 'drop'); return; }
     if (this.inBounds(p.x, p.y)) p.oob = Math.max(0, p.oob - dt * 2);
@@ -422,7 +492,7 @@ stepPlayer(p, dt) {
       p.onIce = false;
       for (const h of this.hazards) {
         if (Math.hypot(h.x - p.x, h.y - p.y) > 17) continue;
-        if (h.owner === p) continue;
+        if (h.owner === p) continue;   // your own fire and ice never hurt you (e.g. when your boomerang flies back through its trail)
         if (h.type === 0) { if (p.burn <= 0 && !this.wetAt(p.x, p.y)) { p.burn = 4; p.burner = h.owner; this.ev('burn', p.x, p.y); } }
         else p.onIce = true;
       }
@@ -450,6 +520,7 @@ stepPlayer(p, dt) {
     }
   }
 
+  // homing boomerangs: curve gently towards the best enemy in front of them
   steer(b, p, dt) {
     const by = b.dfl || p, sp = Math.hypot(b.vx, b.vy); if (sp < 1) return;
     const heading = Math.atan2(b.vy, b.vx); let best = null, bs = 1e9, bda = 0;
@@ -465,11 +536,11 @@ stepPlayer(p, dt) {
     b.vx = Math.cos(a) * sp; b.vy = Math.sin(a) * sp;
   }
 
-stepBooms(dt) {
+  stepBooms(dt) {
     for (const p of this.players) {
       for (const b of p.boom.slice()) {
         if (b.s === 'held') continue;
-        if (b.s === 'drop' && p.alive && Math.hypot(p.x - b.x, p.y - b.y) < 22) { this.catchB(p, b); continue; }
+        if (b.s === 'drop' && p.alive && Math.hypot(p.x - b.x, p.y - b.y) < 22) { this.catchB(p, b); continue; }   // walk over a dropped boomerang to pick it up
         if (b.fuse > 0) { b.fuse -= dt; if (b.fuse <= 0) { this.explode(p, b); continue; } }
         if (b.dflT > 0) b.dflT -= dt;
         if ((b.s === 'fly' || b.s === 'ret') && !(b.dflT > 0)) {
@@ -491,10 +562,12 @@ stepBooms(dt) {
           b.vx = Math.cos(ang) * this.bSpeed * 0.8 * b.sp; b.vy = Math.sin(ang) * this.bSpeed * 0.8 * b.sp; b.ctl = true;
         } else b.ctl = false;
         if (b.s === 'fly') {
+          // The outbound range is counted at full speed, so a slowed (bounced) boomerang still covers the
+          // same total distance, just more slowly. That is what lets it reach its 3 bounces and the final wall.
           if (!b.ctl) b.t += dt * b.sp;
           if (this.set.homing && !b.ctl) this.steer(b, p, dt);
           let px = b.x, py = b.y, stopped = false;
-          const n = Math.max(1, Math.ceil(Math.hypot(b.vx, b.vy) * dt / 3));
+          const n = Math.max(1, Math.ceil(Math.hypot(b.vx, b.vy) * dt / 3));   // sub-steps so it touches walls instead of stopping short
           const sx = b.vx * dt / n, sy = b.vy * dt / n;
           for (let i = 0; i < n; i++) {
             const nx = px + sx, ny = py + sy;
@@ -502,13 +575,13 @@ stepBooms(dt) {
             if (!edgeX && !edgeY && !this.wallHit(nx, ny, B_R)) { px = nx; py = ny; continue; }
             if (this.set.bounce && b.bn < BOUNCE_MAX) {
               const hx = edgeX || this.wallHit(nx, py, B_R), hy = edgeY || this.wallHit(px, ny, B_R);
-              if (hx || !hy) b.vx = -b.vx;
-              if (hy || !hx) b.vy = -b.vy;
+              if (hx || !hy) b.vx = -b.vx;       // blocked sideways (or clipped a corner): reflect x
+              if (hy || !hx) b.vy = -b.vy;       // blocked vertically (or clipped a corner): reflect y
               b.vx *= BOUNCE_SPEED; b.vy *= BOUNCE_SPEED; b.sp *= BOUNCE_SPEED; b.bn++;
               this.ev('bnc', px, py, b.bn);
             } else {
-              b.s = 'drop'; b.vx = b.vy = 0; b.dfl = null; stopped = true;
-              this.ev('thud', px, py);
+              b.s = 'drop'; b.vx = b.vy = 0; b.dfl = null; stopped = true; this.settle(b);
+              this.ev('thud', b.x, b.y);
             }
             break;
           }
@@ -521,51 +594,12 @@ stepBooms(dt) {
         } else if (b.s === 'ret') {
           const dx = p.x - b.x, dy = p.y - b.y, d = Math.hypot(dx, dy);
           if (d < 20) { this.catchB(p, b); continue; }
-          
+          // A returning boomerang still hits obstacles. With no clear path back to its owner it simply waits where it is
+          // until the owner comes to pick it up.
           const k = Math.min(1, 8 * dt);
-          b.vx += ((dx / d) * B_RET - b.vx) * k;
-          b.vy += ((dy / d) * B_RET - b.vy) * k;
-          let nx = b.x + b.vx * dt, ny = b.y + b.vy * dt;
-
-          if (this.wallHit(nx, ny, B_R)) {
-            // Only attempt a gentle lateral shift if actively recalling via button press
-            if (p.recalling) {
-              const dirX = dx / d, dirY = dy / d;
-              const perpX1 = -dirY, perpY1 = dirX;
-              const perpX2 = dirY, perpY2 = -dirX;
-              
-              const driftSpeed = 100;
-              const t1x = b.x + perpX1 * driftSpeed * dt, t1y = b.y + perpY1 * driftSpeed * dt;
-              const t2x = b.x + perpX2 * driftSpeed * dt, t2y = b.y + perpY2 * driftSpeed * dt;
-
-              const hit1 = this.wallHit(t1x, t1y, B_R);
-              const hit2 = this.wallHit(t2x, t2y, B_R);
-
-              if (!hit1 || !hit2) {
-                let chooseFirst = !hit1;
-                if (!hit1 && !hit2) {
-                  const dist1 = Math.hypot(p.x - t1x, p.y - t1y);
-                  const dist2 = Math.hypot(p.x - t2x, p.y - t2y);
-                  chooseFirst = dist1 <= dist2;
-                }
-                const px = chooseFirst ? perpX1 : perpX2;
-                const py = chooseFirst ? perpY1 : perpY2;
-                
-                b.vx = px * driftSpeed;
-                b.vy = py * driftSpeed;
-                nx = b.x + b.vx * dt;
-                ny = b.y + b.vy * dt;
-              } else {
-                this.waitB(b);
-                continue;
-              }
-            } else {
-              // Passive return: drop immediately on impact
-              this.waitB(b);
-              continue;
-            }
-          }
-
+          b.vx += (dx / d * B_RET - b.vx) * k; b.vy += (dy / d * B_RET - b.vy) * k;
+          const nx = b.x + b.vx * dt, ny = b.y + b.vy * dt;
+          if (this.wallHit(nx, ny, B_R)) { this.waitB(b); continue; }
           this.trail(p, b, nx, ny); b.x = nx; b.y = ny;
         }
         if (b.s === 'fly' || b.s === 'ret') {
@@ -578,6 +612,7 @@ stepBooms(dt) {
       }
     }
   }
+
   stepDecoys(dt) {
     for (const d of this.decoys) {
       if (!d.alive) continue;
@@ -595,16 +630,156 @@ stepBooms(dt) {
     this.decoys = this.decoys.filter(d => d.alive);
   }
 
+  // ---- bot navigation (hide & seek): an A* search over a coarse walkable grid, so bots walk round obstacles instead of grinding against them ----
+  navInit() {
+    if (this.nav) return this.nav;
+    const cs = 12, gw = Math.ceil(W / cs), gh = Math.ceil(H / cs), ok = new Uint8Array(gw * gh);
+    for (let i = 0; i < gw; i++) for (let j = 0; j < gh; j++) { const x = i * cs + cs / 2, y = j * cs + cs / 2; ok[i * gh + j] = A.freeAt(this.arena, x, y, 15, this.bounds) && !this.deadlyR(x, y, 18) ? 1 : 0; }
+    const comp = new Int16Array(gw * gh).fill(-1), sizes = [];
+    for (let i0 = 0; i0 < gw; i0++) for (let j0 = 0; j0 < gh; j0++) if (ok[i0 * gh + j0] && comp[i0 * gh + j0] < 0) {
+      const id = sizes.length, st = [[i0, j0]]; let c = 0; comp[i0 * gh + j0] = id;
+      while (st.length) { const [i, j] = st.pop(); c++; for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const ni = i + di, nj = j + dj; if (ni >= 0 && nj >= 0 && ni < gw && nj < gh && ok[ni * gh + nj] && comp[ni * gh + nj] < 0) { comp[ni * gh + nj] = id; st.push([ni, nj]); } } }
+      sizes.push(c);
+    }
+    return (this.nav = { cs, gw, gh, ok, comp, main: sizes.indexOf(Math.max(...sizes)) });
+  }
+  // a random spot in the main walkable area (optionally at least minD away from (fx, fy))
+  navRandom(fx, fy, minD = 0) {
+    const nv = this.navInit(); let best = null;
+    for (let t = 0; t < 200; t++) {
+      const i = Math.floor(Math.random() * nv.gw), j = Math.floor(Math.random() * nv.gh);
+      if (nv.comp[i * nv.gh + j] !== nv.main) continue;
+      const x = i * nv.cs + nv.cs / 2, y = j * nv.cs + nv.cs / 2; if (!this.inBounds(x, y, 24)) continue;
+      best = [x, y]; if (fx === undefined || Math.hypot(x - fx, y - fy) >= minD) return best;
+    }
+    return best;
+  }
+  // cheapest walk from (sx, sy) to any cell where goal(x, y) holds; h(x, y) is an optimistic distance left. Returns waypoints or null.
+  navFind(sx, sy, goal, h) {
+    const { cs, gw, gh, ok } = this.navInit(), n = gw * gh;
+    const cell = (x, y) => [Math.max(0, Math.min(gw - 1, Math.floor(x / cs))), Math.max(0, Math.min(gh - 1, Math.floor(y / cs)))];
+    let [si, sj] = cell(sx, sy);
+    if (!ok[si * gh + sj]) {   // standing in a tight spot: start from the nearest open cell
+      let found = false;
+      for (let d = 1; d < 5 && !found; d++) for (let a = -d; a <= d && !found; a++) for (let b = -d; b <= d && !found; b++) { const ni = si + a, nj = sj + b; if (ni >= 0 && nj >= 0 && ni < gw && nj < gh && ok[ni * gh + nj]) { si = ni; sj = nj; found = true; } }
+      if (!found) return null;
+    }
+    const g = new Float32Array(n).fill(1e9), par = new Int32Array(n).fill(-1), done = new Uint8Array(n), heap = [];
+    const push = (id, f) => { heap.push([f, id]); let k = heap.length - 1; while (k > 0) { const p = (k - 1) >> 1; if (heap[p][0] <= heap[k][0]) break; [heap[p], heap[k]] = [heap[k], heap[p]]; k = p; } };
+    const pop = () => { const top = heap[0], last = heap.pop(); if (heap.length) { heap[0] = last; let k = 0; for (;;) { const l = 2 * k + 1, r = l + 1; let m = k; if (l < heap.length && heap[l][0] < heap[m][0]) m = l; if (r < heap.length && heap[r][0] < heap[m][0]) m = r; if (m === k) break; [heap[m], heap[k]] = [heap[k], heap[m]]; k = m; } } return top; };
+    const s0 = si * gh + sj; g[s0] = 0; push(s0, 0);
+    const D = [[1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1], [1, 1, 1.41], [1, -1, 1.41], [-1, 1, 1.41], [-1, -1, 1.41]];
+    let goalId = -1, guard = 0;
+    while (heap.length && guard++ < 6000) {
+      const [, id] = pop(); if (done[id]) continue; done[id] = 1;
+      const ci = Math.floor(id / gh), cj = id % gh, cx = ci * cs + cs / 2, cy = cj * cs + cs / 2;
+      if (goal(cx, cy)) { goalId = id; break; }
+      for (const [di, dj, w] of D) {
+        const ni = ci + di, nj = cj + dj; if (ni < 0 || nj < 0 || ni >= gw || nj >= gh) continue;
+        const nid = ni * gh + nj; if (!ok[nid] || done[nid]) continue;
+        if (di && dj && (!ok[(ci + di) * gh + cj] || !ok[ci * gh + cj + dj])) continue;   // no cutting corners
+        const ng = g[id] + w * cs; if (ng < g[nid]) { g[nid] = ng; par[nid] = id; push(nid, ng + h(ni * cs + cs / 2, nj * cs + cs / 2)); }
+      }
+    }
+    if (goalId < 0) return null;
+    const out = []; for (let id = goalId; id >= 0; id = par[id]) out.push([Math.floor(id / gh) * cs + cs / 2, id % gh * cs + cs / 2]);
+    return out.reverse();
+  }
+  clearLine(x1, y1, x2, y2) {
+    const d = Math.hypot(x2 - x1, y2 - y1), n = Math.ceil(d / 6);
+    for (let i = 1; i <= n; i++) { const t = i / n, x = x1 + (x2 - x1) * t, y = y1 + (y2 - y1) * t; if (!A.freeAt(this.arena, x, y, 15, this.bounds) || this.deadlyR(x, y, 16)) return false; }
+    return true;
+  }
+  followPath(p, ai) {
+    const path = ai.path, inp = p.input; if (!path || !path.length) return;
+    while (ai.pi < path.length - 1 && Math.hypot(path[ai.pi][0] - p.x, path[ai.pi][1] - p.y) < 13) ai.pi++;
+    let k = ai.pi;
+    for (let q = Math.min(path.length - 1, ai.pi + 6); q > ai.pi; q--) if (this.clearLine(p.x, p.y, path[q][0], path[q][1])) { k = q; break; }   // cut straight across open ground
+    const dx = path[k][0] - p.x, dy = path[k][1] - p.y, l = Math.hypot(dx, dy);
+    if (l > 3) { inp.mx = dx / l; inp.my = dy / l; }
+  }
+  // walk until distFn(position) <= reach. 'arrived', 'moving' or 'nopath'.
+  walkTo(p, ai, key, distFn, reach, dt) {
+    if (distFn(p.x, p.y) <= reach) { ai.path = null; return 'arrived'; }
+    ai.pathT = (ai.pathT || 0) - dt;
+    if (ai.pk !== key || !ai.path || ai.pathT <= 0) {
+      ai.pk = key; ai.pathT = 0.8; ai.pi = 0;
+      ai.path = this.navFind(p.x, p.y, (x, y) => distFn(x, y) <= reach * 0.9, (x, y) => Math.max(0, distFn(x, y) - reach));
+      if (!ai.path) return 'nopath';
+    }
+    this.followPath(p, ai); return 'moving';
+  }
+  // hide & seek bots: hiders pick a spot beside a prop and keep still; the seeker checks props and players one by one
+  aiHide(p, dt, ai) {
+    const hs = this.hs, inp = p.input, lvl = this.set.ai, sk = this.players.find(q => q.id === hs.seeker);
+    let small = this.arena.walls.filter(w => w.w <= 34 && w.h <= 34); if (!small.length) small = this.arena.walls;   // maps made of long walls: check those instead
+    if (p.id !== hs.seeker) {
+      if (hs.ph === 'hide') {
+        if (!ai.hp) {
+          const nv = this.navInit(); let spot = null;
+          for (let tries = 0; tries < 80 && !spot; tries++) {
+            let x, y;
+            if (small.length && tries < 60) { const w = small[Math.floor(Math.random() * small.length)], an = Math.random() * 6.283; x = w.x + w.w / 2 + Math.cos(an) * (62 + Math.random() * 20); y = w.y + w.h / 2 + Math.sin(an) * (62 + Math.random() * 20); }
+            else { const b = this.bounds; x = b.x + 30 + Math.random() * (b.w - 60); y = b.y + 30 + Math.random() * (b.h - 60); }
+            const i = Math.floor(x / nv.cs), j = Math.floor(y / nv.cs);
+            if (i >= 0 && j >= 0 && i < nv.gw && j < nv.gh && nv.comp[i * nv.gh + j] === nv.main && this.inBounds(x, y, 24) && (!sk || Math.hypot(sk.x - x, sk.y - y) > 120) && !this.players.some(q => q !== p && q !== sk && q.ai && q.ai.hp && Math.hypot(q.ai.hp[0] - x, q.ai.hp[1] - y) < 70) && small.every(w => Math.hypot(w.x + w.w / 2 - x, w.y + w.h / 2 - y) > 48)) spot = [x, y];
+          }
+          ai.hp = spot || [p.x, p.y];
+        }
+        const res = this.walkTo(p, ai, 'hide', (x, y) => Math.hypot(ai.hp[0] - x, ai.hp[1] - y), 10, dt);
+        if (res === 'nopath') ai.hp = null;
+      } else if (p.disg < 0 && sk && sk.alive && Math.hypot(sk.x - p.x, sk.y - p.y) < 110) {   // spotted out of disguise: run for it
+        if (!ai.fp || Math.hypot(ai.fp[0] - sk.x, ai.fp[1] - sk.y) < 150) { ai.fp = this.navRandom(sk.x, sk.y, 250); ai.pk = null; }
+        if (ai.fp) this.walkTo(p, ai, 'flee', (x, y) => Math.hypot(ai.fp[0] - x, ai.fp[1] - y), 12, dt);
+      }
+      return;
+    }
+    if (hs.ph !== 'seek' || !p.alive) return;
+    ai.wait = (ai.wait || 0) - dt; ai.tgT = (ai.tgT || 0) - dt;
+    // a seeker that is not getting anywhere picks something else to do
+    ai.chk = (ai.chk || 0) - dt;
+    if (ai.chk <= 0) { ai.chk = 1.2; if (ai.px !== undefined && Math.hypot(p.x - ai.px, p.y - ai.py) < 8 && ai.wait <= 0 && !ai.idleOk) { ai.tg = null; ai.path = null; ai.pk = null; } ai.px = p.x; ai.py = p.y; }
+    ai.idleOk = false;
+    const held = p.boom.some(b => b.s === 'held' && !b.temp);
+    if (!held) {   // go and fetch the boomerang
+      let db = null, dd = 1e9; for (const q of p.boom) if (q.s === 'drop') { const d = Math.hypot(q.x - p.x, q.y - p.y); if (d < dd) { dd = d; db = q; } }
+      if (db && dd <= 30) { const l = dd || 1; inp.mx = (db.x - p.x) / l; inp.my = (db.y - p.y) / l; }   // last few steps: straight onto it
+      else if (db) { if (this.walkTo(p, ai, 'boom', (x, y) => Math.hypot(db.x - x, db.y - y), 28, dt) === 'nopath') { const w = this.navRandom(p.x, p.y, 100); if (w) { ai.wx = w[0]; ai.wy = w[1]; ai.pk = null; ai.wanderT = 1.5; } } } else ai.idleOk = true;
+      return;
+    }
+    if (!this.seekerCan(p)) return;
+    if (ai.wanderT > 0) { ai.wanderT -= dt; if (this.walkTo(p, ai, 'wander', (x, y) => Math.hypot(ai.wx - x, ai.wy - y), 14, dt) !== 'moving') ai.wanderT = 0; return; }   // not getting anywhere: stroll somewhere else
+    if (ai.wait > 0) { ai.idleOk = true; return; }
+    if (!ai.tg || ai.tgT <= 0 || (ai.tg.h && !ai.tg.h.alive)) {
+      const hid = this.players.filter(q => q !== p && q.alive), pHider = [0.12, 0.2, 0.3][lvl];
+      if (hid.length && (Math.random() < pHider || !small.length)) { const h = hid[Math.floor(Math.random() * hid.length)]; ai.tg = { h }; }
+      else { const w = small[Math.floor(Math.random() * small.length)]; ai.tg = { w, x: w.x + w.w / 2, y: w.y + w.h / 2 }; }
+      ai.tgT = 8; ai.path = null; ai.pk = null;
+    }
+    const t = ai.tg; if (t.h) { t.x = t.h.x; t.y = t.h.y; }
+    const dx = t.x - p.x, dy = t.y - p.y, d = Math.hypot(dx, dy);
+    inp.aim = Math.atan2(dy, dx);
+    if (t.h && d < 380 && d > 120 && p.slashCd <= 0 && Math.random() < dt * 0.5 && this.clearLine(p.x, p.y, t.x, t.y)) { inp.t = true; ai.wait = 1.2; ai.tg = null; return; }
+    const distFn = t.w ? (x, y) => Math.hypot(Math.max(t.w.x - x, 0, x - (t.w.x + t.w.w)), Math.max(t.w.y - y, 0, y - (t.w.y + t.w.h))) : (x, y) => Math.hypot(t.x - x, t.y - y);
+    const res = this.walkTo(p, ai, t.h ? 'h' + t.h.id : 'w' + small.indexOf(t.w), distFn, t.w ? 26 : 34, dt);
+    if (res === 'arrived') { if (p.slashCd <= 0) { inp.m = true; ai.wait = 0.5 + Math.random() * 0.6; ai.tg = null; ai.idleOk = true; } }
+    else if (res === 'nopath') {
+      ai.tg = null; ai.fail = (ai.fail || 0) + 1;
+      if (ai.fail >= 3) { ai.fail = 0; ai.wanderT = 3; const w = this.navRandom(p.x, p.y, 120); if (w) { ai.wx = w[0]; ai.wy = w[1]; ai.pk = null; } else ai.wanderT = 0; }
+    } else ai.fail = 0;
+  }
+
   aiThink(p, dt) {
     const ai = p.ai || (p.ai = { cool: 1 + Math.random(), strafe: Math.random() < 0.5 ? 1 : -1, st: 0, dodge: 0, dx: 0, dy: 0 });
     const inp = p.input, lvl = this.set.ai;
     inp.mx = 0; inp.my = 0; inp.dh = false;
     if (p.frozen) { if (Math.random() < dt * 9) inp.d = true; return; }
     ai.cool -= dt; ai.st -= dt; ai.dodge -= dt;
+    if (this.hs) { this.aiHide(p, dt, ai); return; }
     if (ai.st <= 0) { ai.strafe *= -1; ai.st = 1 + Math.random() * 2; }
     const en = this.enemiesOf(p); let near = null, nd = 1e9;
     for (const e of en) { const d = Math.hypot(e.x - p.x, e.y - p.y); if (d < nd) { nd = d; near = e; } }
-    if (this.golden && this.gold.holder && this.gold.holder !== p && this.gold.holder.alive) { near = this.gold.holder; nd = Math.hypot(near.x - p.x, near.y - p.y); }
+    if (this.golden && this.gold.holder && this.gold.holder !== p && this.gold.holder.alive) { near = this.gold.holder; nd = Math.hypot(near.x - p.x, near.y - p.y); }   // everyone hunts the carrier
     const held = p.boom.some(b => b.s === 'held' && !b.temp);
     let wx = 0, wy = 0;
 
@@ -632,37 +807,29 @@ stepBooms(dt) {
     } else {
       const b = this.bounds;
       if (!this.inBounds(p.x, p.y, 28) && !trapped) toward(b.x + b.w / 2, b.y + b.h / 2, 3);
-      let bk = null, bkd = 1e9;
+      let stuck = null, sd = 1e9;   // a boomerang lying on the ground
+      for (const q of p.boom) if (q.s === 'drop') { const d = Math.hypot(q.x - p.x, q.y - p.y); if (d < sd) { sd = d; stuck = q; } }
+      let bk = null, bkd = stuck ? 1e9 : 280;
       for (const k of this.books) { const d = Math.hypot(k.x - p.x, k.y - p.y); if (d < bkd) { bkd = d; bk = k; } }
+      if (stuck && !p.gold) {
+        // head straight for a book (it refills the boomerang) if that is clearly closer, otherwise walk over the boomerang
+        if (bk && bkd < sd * 0.7) toward(bk.x, bk.y, 3.2); else toward(stuck.x, stuck.y, 3.2);
+      } else if (bk && (!near || nd > 120)) toward(bk.x, bk.y, 1.6);
       if (this.golden && !this.gold.holder) toward(this.gold.x, this.gold.y, 2.4);
-
-      if (held) {
-        if (bk && (!near || nd > 120)) toward(bk.x, bk.y, 1.6);
-        if (near) {
-          const dx = near.x - p.x, dy = near.y - p.y, l = nd || 1;
+      if (near) {
+        const dx = near.x - p.x, dy = near.y - p.y, l = nd || 1;
+        if (held) {
           if (this.time > 60) toward(near.x, near.y, 1.5);
           else if (nd > 260) toward(near.x, near.y, 1); else if (nd < 140) toward(p.x * 2 - near.x, p.y * 2 - near.y, 1);
           wx += -dy / l * ai.strafe * 0.8; wy += dx / l * ai.strafe * 0.8;
-        }
-      } else {
-        // AI has no held boomerang: immediately target the closest dropped boomerang or blue book
-        let db = null, dd = 1e9;
-        for (const q of p.boom) if (q.s === 'drop') { const d = Math.hypot(q.x - p.x, q.y - p.y); if (d < dd) { dd = d; db = q; } }
-        
-        if (bk && (!db || bkd < dd)) {
-          toward(bk.x, bk.y, 2.5);
-        } else if (db) {
-          toward(db.x, db.y, 2.5);
-        } else if (bk) {
-          toward(bk.x, bk.y, 2.0);
-        } else if (near && nd < 220) {
-          toward(p.x * 2 - near.x, p.y * 2 - near.y, 1);
-        }
-
-        if (this.set.pullBack && p.boom.some(q => q.s === 'drop')) {
-          inp.r = true;
+        } else {
+          let db = null, dd = 1e9;
+          for (const q of p.boom) if (q.s === 'drop') { const d = Math.hypot(q.x - p.x, q.y - p.y); if (d < dd) { dd = d; db = q; } }
+          if (db && (dd < 120 || (!this.set.pullBack && (!near || nd > 90)))) toward(db.x, db.y, this.set.pullBack ? 1.2 : 2);   // no pull back: fetch it on foot
+          else if (nd < 220) toward(p.x * 2 - near.x, p.y * 2 - near.y, 1);
         }
       }
+      if (this.set.pullBack && p.boom.some(q => q.s === 'drop') && Math.random() < dt * 4) inp.r = true;
     }
 
     if (ai.dodge <= 0) {
@@ -716,10 +883,12 @@ stepBooms(dt) {
   step(dt) {
     this.time += dt;
     for (const p of this.players) if (p.bot && p.alive) this.aiThink(p, dt);
+    // A stalled client (backgrounded tab, network hiccup) must not keep running with its last held keys:
+    // after 0.25s without input the player stands still.
     for (const p of this.players) if (p.alive && !p.bot && ++p.idle > 15) { p.input.mx = 0; p.input.my = 0; p.input.dh = false; }
     if (this.golden) for (const p of this.players) if (!p.alive && p.rt > 0 && !this.over) { p.rt -= dt; if (p.rt <= 0) this.respawn(p); }
     for (const p of this.players) if (p.alive) this.stepPlayer(p, dt);
-    const al = this.players.filter(p => p.alive);
+    const al = this.hs ? [] : this.players.filter(p => p.alive);   // hide & seek: gums pass through each other, nobody can be shoved around
     for (let i = 0; i < al.length; i++) for (let j = i + 1; j < al.length; j++) {
       const a = al[i], b = al[j], dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy);
       if (d < R_P * 2 && d > 0.01) { const push = (R_P * 2 - d) / 2; this.moveP(a, -dx / d * push, -dy / d * push, false); this.moveP(b, dx / d * push, dy / d * push, false); }
@@ -728,32 +897,24 @@ stepBooms(dt) {
     this.stepBooms(dt);
     this.stepHazards(dt);
     this.stepGold(dt);
-    const interval = { off: 0, slow: 12, normal: 7, fast: 3.5 }[this.set.books];
+    const interval = this.hs ? 0 : { off: 0, slow: 12, normal: 7, fast: 3.5 }[this.set.books];
     if (interval > 0) { this.bookT -= dt; if (this.bookT <= 0) { if (this.books.length < 5) this.spawnBook(); this.bookT = interval; } }
     for (let i = this.books.length - 1; i >= 0; i--) {
       const k = this.books[i];
-      for (const p of this.players) if (p.alive && Math.hypot(p.x - k.x, p.y - k.y) < 24) {
-        this.givePU(p, this.pickRandomPU(p));
-        // Blue Book automatically replenishes boomerangs
-        for (const b of p.boom.slice()) {
-          if (b.s !== 'held') this.catchB(p, b);
-        }
-        this.ev('pk', k.x, k.y);
-        this.books.splice(i, 1);
-        break;
-      }
+      for (const p of this.players) if (p.alive && Math.hypot(p.x - k.x, p.y - k.y) < 24) { this.givePU(p, this.pickRandomPU(p)); for (const b of p.boom.slice()) if (b.s !== 'held') this.catchB(p, b); this.ev('pk', k.x, k.y); this.books.splice(i, 1); break; }
     }
-    if (!this.golden && this.time > 75 && this.time - this.lastSD > 12) { this.lastSD = this.time; const b = this.target || this.bounds; this.shrink(b.x + b.w / 2, b.y + b.h / 2, 0.7); }
+    this.stepHide(dt);
+    if (!this.golden && !this.hs && this.time > 75 && this.time - this.lastSD > 12) { this.lastSD = this.time; const b = this.target || this.bounds; this.shrink(b.x + b.w / 2, b.y + b.h / 2, 0.7); }
     if (this.target) {
       const b = this.bounds, t = this.target, s = 70 * dt;
       const mv = (c, to) => c < to ? Math.min(to, c + s) : Math.max(to, c - s);
       const l = mv(b.x, t.x), tp = mv(b.y, t.y), rr = mv(b.x + b.w, t.x + t.w), bt = mv(b.y + b.h, t.y + t.h);
       b.x = l; b.y = tp; b.w = rr - l; b.h = bt - tp;
     }
-    if (!this.over && this.golden && this.time > 210) {
+    if (!this.over && this.golden && this.time > 210) {   // nobody got there: whoever held it longest wins
       this.over = true; let best = null; for (const p of this.players) if (p.goldT > 0 && (!best || p.goldT > best.goldT)) best = p; this.winner = best;
     }
-    if (!this.over && !this.golden && this.players.length >= 2) {
+    if (!this.over && !this.golden && !this.hs && this.players.length >= 2) {
       const alive = this.players.filter(p => p.alive);
       if (alive.length <= 1) { this.over = true; this.winner = alive[0] || null; }
       else if (this.time > 150) { this.over = true; this.winner = null; }
@@ -767,8 +928,9 @@ stepBooms(dt) {
         al: p.alive ? 1 : 0, v: p.variant, sh: p.pu.includes('shield') ? 1 : 0, fr: p.frozen ? 1 : 0, bn: p.burn > 0 ? 1 : 0, ds: p.disg,
         dh: p.dashT > 0 ? 1 : 0, sl: p.slash > 0 ? +(p.slash / SLASH_T).toFixed(2) : 0, bm: p.bam > 0 ? 1 : 0, oo: +(p.oob / 3).toFixed(2),
         iv: p.invuln > 0 ? 1 : 0, pu: p.pu, hd: p.boom.filter(b => b.s === 'held' && !b.temp).length, tk: p.tk ? 1 : 0, cd: +p.dashCd.toFixed(3) };
+      // what the owning client needs to keep predicting its own movement from this snapshot
       if (this.golden) { e.gt = +p.goldT.toFixed(1); if (p.gold) e.gh = 1; if (!p.alive) e.rt = +Math.max(0, p.rt).toFixed(1); }
-      if (!p.alive && p.gx !== undefined) { e.gx = rnd(p.gx); e.gy = rnd(p.gy); }
+      if (!p.alive && p.gx !== undefined) { e.gx = rnd(p.gx); e.gy = rnd(p.gy); }   // gravestone spot
       if (p.onIce) e.ic = 1;
       if (p.dashT > 0) { e.dtm = +p.dashT.toFixed(4); e.dd = [+p.ddx.toFixed(4), +p.ddy.toFixed(4)]; }
       pl.push(e);
@@ -779,6 +941,8 @@ stepBooms(dt) {
     const ev = this.events; this.events = [];
     const out = { ar: this.idx, bd: [Math.round(this.bounds.x), Math.round(this.bounds.y), Math.round(this.bounds.w), Math.round(this.bounds.h)],
       pl, bo, hz: this.hazards.map(h => [Math.round(h.x), Math.round(h.y), h.type, +h.t.toFixed(1)]), bk: this.books.map(k => [Math.round(k.x), Math.round(k.y)]), ev };
+    if (this.hs) out.hs = { sk: this.hs.seeker, ph: this.hs.ph, bt: HIDE_PREP - HIDE_LOOK, t: +(this.hs.ph === 'hide' ? this.hs.t : this.hs.left).toFixed(1), u: this.hs.unl ? -1 : (this.players.find(p => p.id === this.hs.seeker) || {}).uses, res: this.hs.res };
+    if (this.sd) out.sd = 1;
     if (this.golden) { out.gm = GOLD_TIME; if (!this.gold.holder) out.gb = [Math.round(this.gold.x), Math.round(this.gold.y)]; }
     return out;
   }
@@ -789,16 +953,21 @@ class Match {
     this.set = sanitizeSettings(settings); this.infos = infos;
     this.scores = {}; for (const i of infos) this.scores[i.id] = 0;
     this.playerPUs = {}; for (const i of infos) this.playerPUs[i.id] = [];
-    this.seqs = {};
-    this.round = 0; this.lastArena = -1; this.finished = false; this.winnerId = null; this.champId = null;
+    this.seqs = {};   // last input sequence number received from each human (echoed in snapshots for client prediction)
+    this.round = 0; this.hideRound = 0; this.sd = null; this.lastArena = -1; this.finished = false; this.winnerId = null; this.champId = null;   // sd: ids of the players in a sudden-death round (everyone else spectates)
     this.startRound();
   }
   startRound() {
     this.round++;
-    const pool = this.set.arenas;
+    const sdMode = !!this.sd, mode = sdMode ? 'last' : this.set.mode;   // sudden death is a normal free-for-all
+    let pool = this.set.arenas.filter(i => A.usable(i, mode));   // the maps the host ticked that suit this mode: a random one each round, never the same twice in a row
+    if (!pool.length) pool = A.list.map((_, i) => i).filter(i => A.usable(i, mode));
     let idx; do { idx = pool[Math.floor(Math.random() * pool.length)]; } while (idx === this.lastArena && pool.length > 1);
     this.lastArena = idx;
-    this.game = new Round(idx, this.infos, this.scores, this.set, this.playerPUs);
+    let seeker = null, infos = this.infos, set = this.set;
+    if (sdMode) { infos = this.infos.filter(i => this.sd.includes(i.id)); set = Object.assign({}, this.set, { mode: 'last' }); }
+    else if (this.set.mode === 'hide') seeker = this.infos[this.hideRound++ % this.infos.length].id;   // hide & seek: everyone takes a turn as seeker, round after round
+    this.game = new Round(idx, infos, this.scores, set, this.playerPUs, seeker, sdMode);
     this.phase = 'countdown'; this.t = 3; this.winnerId = null;
   }
   input(id, inp) {
@@ -824,17 +993,29 @@ class Match {
       if (g.over) {
         this.phase = 'over'; this.t = 3.2;
         this.winnerId = g.winner ? g.winner.id : null;
-        if ((this.set.mode === 'last' || this.set.mode === 'golden') && g.winner) this.scores[g.winner.id]++;
+        if (!g.sd && (this.set.mode === 'last' || this.set.mode === 'golden') && g.winner) this.scores[g.winner.id]++;
         for (const p of g.players) {
-          this.playerPUs[p.id] = this.set.puCarry ? p.pu.slice() : [];
+          this.playerPUs[p.id] = this.set.puCarry && !this.game.hs ? p.pu.slice() : [];
         }
       }
     } else if (this.phase === 'over') {
       g.step(dt); this.t -= dt;
       if (this.t <= 0) {
+        if (this.sd) {   // sudden death: last one standing is the champion; a draw means another sudden-death round
+          if (this.winnerId) { this.phase = 'end'; this.t = 8; this.champId = this.winnerId; }
+          else this.startRound();
+          return;
+        }
         const top = Math.max(...this.infos.map(i => this.scores[i.id]));
         const leaders = this.infos.filter(i => this.scores[i.id] === top);
-        if (top >= this.set.target && leaders.length === 1) { this.phase = 'end'; this.t = 8; this.champId = leaders[0].id; }
+        if (this.set.mode === 'hide') {
+          // first to the win target takes the match; if several get there in the same round they go to sudden death and the rest spectate
+          const done = this.infos.filter(i => this.scores[i.id] >= this.set.hideWins);
+          if (done.length === 1) { this.phase = 'end'; this.t = 8; this.champId = done[0].id; }
+          else if (done.length > 1) { this.sd = done.map(i => i.id); this.startRound(); }
+          else this.startRound();
+        }
+        else if (top >= this.set.target && leaders.length === 1) { this.phase = 'end'; this.t = 8; this.champId = leaders[0].id; }
         else this.startRound();
       }
     } else if (this.phase === 'end') {
@@ -843,7 +1024,7 @@ class Match {
   }
   snapshot() {
     const s = this.game.snap();
-    s.ph = this.phase; s.tm = Math.max(0, +this.t.toFixed(2)); s.rd = this.round; s.sc = this.scores; s.w = this.winnerId; s.ch = this.champId;
+    s.ph = this.phase; s.tm = Math.max(0, +this.t.toFixed(2)); s.rd = this.round; s.sc = this.scores; if (this.set.mode === 'hide') s.tg = this.set.hideWins; s.w = this.winnerId; s.ch = this.champId;
     for (const e of s.pl) if (this.seqs[e.id]) e.sq = this.seqs[e.id];
     return s;
   }
