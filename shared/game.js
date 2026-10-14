@@ -7,9 +7,11 @@ const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 const rnd = v => Math.round(v * 10) / 10;
 
 const R_P = 14, R_WALL = 9, SPEED = 200, DASH_SP = 560, DASH_T = 0.18, DASH_CD = 1.0;
-const B_OUT = 0.6, B_RET = 620, B_R = 7, TK_R = 260, EXPL_R = 80;
+const FALL_GRACE = 0.55, FALL_T = 0.75;   // standing over water or a pit: shake for 0.55 s (time to step out), then fall (shrinking and spinning) for 0.75 s
+const B_OUT = 0.6, B_RET = 620, B_R = 7, TK_R = 280, EXPL_R = 80;
 const SLASH_T = 0.22;
 const DT = 1 / 60;                          // fixed simulation step: server, offline single-player and client prediction all use it
+const SEEKER_SPEED = 0.8;   // hide & seek: the seeker walks at 0.8x
 const BOUNCE_MAX = 3, BOUNCE_SPEED = 0.5;   // a boomerang can bounce off walls 3 times, losing half its speed each time, then stops at the next wall
 
 const HOMING_TURN = 1.2;   // rad/s a homing boomerang can curve
@@ -31,7 +33,7 @@ const PU_INFO = {
   disguise: { n: 'Disguise', d: 'Stand still to turn into an object' },
   shield: { n: 'Shield', d: 'Survive one hit' },
   battleroyale: { n: 'Battle Royale', d: 'Shrinks the arena around you' },
-  telekinesis: { n: 'Telekinesis', d: 'Hold dash + move to steer your boomerang' },
+  telekinesis: { n: 'Telekinesis', d: 'Hold pull-back and move the mouse to fly your boomerang by hand' },
   decoy: { n: 'Decoy', d: 'Spawns a fake clone' },
   bamboozled: { n: 'Bamboozled', d: 'Inverts your controls briefly' },
 };
@@ -67,11 +69,12 @@ function sanitizeSettings(s) {
   o.pullBack = !!s.pullBack;     // hold the throw button to pull dropped boomerangs back (otherwise walk over them)
   o.homing = !!s.homing;         // thrown boomerangs arc slightly towards enemies
   o.goldThrow = !!s.goldThrow;   // golden boomerang mode: may the holder throw it? (off = melee only)
-  const ht = parseInt(s.hideTime); o.hideTime = Number.isNaN(ht) ? 60 : clamp(ht, 10, 600);   // hide & seek: seconds the hiders must survive
+  const ht = parseInt(s.hideTime); o.hideTime = Number.isNaN(ht) ? 120 : clamp(ht, 10, 600);   // hide & seek: seconds the hiders must survive
   const hu = parseInt(s.hideUses); o.hideUses = Number.isNaN(hu) ? 12 : clamp(hu, 0, 99);   // hide & seek: seeker melee + throw limit (0 = unlimited)
   const hw = parseInt(s.hideWins); o.hideWins = Number.isNaN(hw) ? 7 : clamp(hw, 1, 25);   // hide & seek: round wins needed to win the match
   const bg = parseInt(s.ballGoals); o.ballGoals = Number.isNaN(bg) ? 3 : clamp(bg, 0, 25);   // boomerang ball: goals that win the match (0 = no goal limit, play to the clock)
   const bt = parseInt(s.ballTime); o.ballTime = BALL_TIMES.includes(bt) ? bt : 360;            // boomerang ball: match length in seconds
+  o.ballPU = !!s.ballPU;   // boomerang ball: blue books (power-ups) are off unless the host turns them on
   o.teamSel = s.teamSel === 'host' ? 'host' : 'players';                                         // boomerang ball: who picks the teams
   const bz = parseInt(s.ballSize); o.ballSize = Number.isNaN(bz) ? 0 : clamp(bz, 0, 3);          // boomerang ball: players per team (0 = just enough, bots fill empty spots)
   o.puCarry = !!s.puCarry;       // power-ups carry over into the next round
@@ -86,16 +89,18 @@ function sanitizeSettings(s) {
   return o;
 }
 
+// bots get a random name and a random colour that no one else is using
+function shuffled(a) { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+function botNames() { const q = shuffled(BOT_NAMES); let i = 0; return () => q[i++ % q.length]; }
+function botVariants(used) {
+  return () => { const free = VARIANTS.map((_, i) => i).filter(i => !used.has(i)); const v = free.length ? free[Math.floor(Math.random() * free.length)] : Math.floor(Math.random() * VARIANTS.length); used.add(v); return v; };
+}
 function fillBots(humans, n) {
   const infos = humans.slice();
   const used = new Set(infos.map(i => i.variant));
   n = Math.min(n, 6 - infos.length);
-  for (let i = 0; i < n; i++) {
-    let v = 0; while (used.has(v) && v < VARIANTS.length) v++;
-    if (v >= VARIANTS.length) v = 0;
-    used.add(v);
-    infos.push({ id: 'bot' + (i + 1), name: BOT_NAMES[i % BOT_NAMES.length], variant: v, bot: true });
-  }
+  const nm = botNames(), vr = botVariants(used);
+  for (let i = 0; i < n; i++) infos.push({ id: 'bot' + (i + 1), name: nm(), variant: vr(), bot: true });
   return infos;
 }
 
@@ -107,11 +112,8 @@ function fillTeams(humans, size) {
   for (const h of hs) if (h.team !== 0 && h.team !== 1) { const k = t[0].length <= t[1].length ? 0 : 1; h.team = k; t[k].push(h); }
   for (const k of [0, 1]) while (t[k].length > 3 && t[1 - k].length < 3) { const h = t[k].pop(); h.team = 1 - k; t[1 - k].push(h); }
   const n = clamp(Math.max(t[0].length, t[1].length, size || 1), 1, 3), infos = hs.slice(), used = new Set(infos.map(i => i.variant));
-  let bn = 0;
-  for (const k of [0, 1]) for (let i = t[k].length; i < n; i++) {
-    let v = 0; while (used.has(v) && v < VARIANTS.length) v++; if (v >= VARIANTS.length) v = 0; used.add(v);
-    infos.push({ id: 'bot' + (++bn), name: BOT_NAMES[(bn - 1) % BOT_NAMES.length], variant: v, bot: true, team: k });
-  }
+  let bn = 0; const nm = botNames(), vr = botVariants(used);
+  for (const k of [0, 1]) for (let i = t[k].length; i < n; i++) infos.push({ id: 'bot' + (++bn), name: nm(), variant: vr(), bot: true, team: k });
   return infos;
 }
 function newB(p) { return { o: p, x: p.x, y: p.y, vx: 0, vy: 0, s: 'held', t: 0, fuse: -1, temp: false, td: 0, ctl: false, dfl: null, dflT: 0, bn: 0, sp: 1 }; }
@@ -147,7 +149,7 @@ function predictStep(arena, s, c, dt) {
       s.ddx = dx; s.ddy = dy; s.dashT = DASH_T; s.dashCd = DASH_CD;
     }
     dashing = s.dashT > 0;
-    const sp = SPEED * (s.caff ? 1.45 : 1) * (s.ice ? 0.5 : 1);
+    const sp = SPEED * (s.sm || 1) * (s.caff ? 1.45 : 1) * (s.ice ? 0.5 : 1);
     if (dashing) { vx = s.ddx * DASH_SP; vy = s.ddy * DASH_SP; s.dashT -= dt; }
     else if (!s.tk) { vx = mx * sp; vy = my * sp; }
   }
@@ -174,7 +176,7 @@ class Round {
       const p = { id: inf.id, team: this.ball ? tmI : -1, idx: i, name: inf.name, bot: !!inf.bot, variant: inf.variant, x: sp[0], y: sp[1], vx: 0, vy: 0,
         aim: Math.atan2(320 - sp[1], 480 - sp[0]), alive: true, pu: carryPUs, boom: [], invuln: 0, dashT: 0, dashCd: 0, ddx: 0, ddy: 0,
         slash: 0, slashCd: 0, burn: 0, burner: null, iceT: 0, frozen: false, fz: 0, iceImm: 0, onIce: false, bam: 0, still: 0, disg: -1,
-        oob: 0, tk: false, tkx: 0, tky: 0, cause: null, ai: null, idle: 0, gold: false, goldT: 0, rt: 0,
+        oob: 0, shk: 0, fall: 0, fcause: null, tk: false, tkx: 0, tky: 0, cause: null, ai: null, idle: 0, gold: false, goldT: 0, rt: 0,
         input: { mx: 0, my: 0, aim: 0, dh: false, t: false, m: false, d: false, r: false } };
       p.input.aim = p.aim;
       p.boom.push(newB(p));
@@ -287,7 +289,7 @@ class Round {
     if (this.ball) spot = this.teamSpot(p);
     if (!spot) spot = this.freeSpot(this.bounds.x + this.bounds.w / 2, this.bounds.y + this.bounds.h / 2);
     Object.assign(p, { alive: true, x: spot[0], y: spot[1], vx: 0, vy: 0, invuln: 1.5, burn: 0, burner: null, frozen: false, fz: 0, iceT: 0, iceImm: 0, onIce: false,
-      dashT: 0, dashCd: 0, slash: 0, slashCd: 0, bam: 0, still: 0, disg: -1, oob: 0, tk: false, cause: null, gold: false, rt: 0, pu: [], boom: [] });
+      dashT: 0, dashCd: 0, slash: 0, slashCd: 0, bam: 0, still: 0, disg: -1, oob: 0, shk: 0, fall: 0, fcause: null, tk: false, cause: null, gold: false, rt: 0, pu: [], boom: [] });
     p.boom.push(newB(p)); delete p.gx; delete p.gy;
     this.ev('resp', p.x, p.y);
   }
@@ -297,7 +299,7 @@ class Round {
     const sk = this.players.find(p => p.id === hs.seeker), hiders = this.players.filter(p => p !== sk);
     if (hs.ph === 'hide') {
       hs.t -= dt;
-      if (hs.t <= 0) { hs.ph = 'seek'; hs.t = 0; for (const p of hiders) if (p.alive) this.disguiseNow(p); this.ev('hs_go'); }
+      if (hs.t <= 0) { hs.ph = 'seek'; hs.t = 0; for (const p of hiders) if (p.alive && p.disg < 0) this.disguiseNow(p); this.ev('hs_go'); }
       return;
     }
     hs.left -= dt;
@@ -337,7 +339,7 @@ class Round {
     if (by && by !== p && cause !== 'drop' && cause !== 'oob' && !this.over && this.set.mode === 'kill') this.scores[by.id] = (this.scores[by.id] || 0) + 1;
   }
   launch(p, b, ang) {
-    b.s = 'fly'; b.t = 0; b.td = 0; b.bn = 0; b.sp = 1; b.x = p.x + Math.cos(ang) * 20; b.y = p.y + Math.sin(ang) * 20;
+    b.s = 'fly'; b.t = 0; b.age = 0; b.td = 0; b.bn = 0; b.sp = 1; b.x = p.x + Math.cos(ang) * 20; b.y = p.y + Math.sin(ang) * 20;
     if (this.wallHit(b.x, b.y, B_R)) { b.x = p.x; b.y = p.y; }
     b.vx = Math.cos(ang) * this.bSpeed; b.vy = Math.sin(ang) * this.bSpeed;
   }
@@ -391,7 +393,7 @@ class Round {
     this.catchB(p, b); b.fuse = -1;
   }
   deflect(b, d) {
-    b.s = 'fly'; b.dfl = d; b.dflT = 0.35; b.t = B_OUT * 0.35; b.ctl = false; b.bn = 0; b.sp = 1;
+    b.s = 'fly'; b.dfl = d; b.dflT = 0.35; b.t = B_OUT * 0.35; b.age = 0; b.ctl = false; b.bn = 0; b.sp = 1;
     b.vx = Math.cos(d.aim) * this.bSpeed * 1.15; b.vy = Math.sin(d.aim) * this.bSpeed * 1.15;
     b.x = d.x + Math.cos(d.aim) * 40; b.y = d.y + Math.sin(d.aim) * 40;
     this.ev('defl', b.x, b.y);
@@ -476,6 +478,7 @@ class Round {
     if (p.bam > 0) { mx = -mx; my = -my; }
     let aT = inp.t, aM = inp.m, aD = inp.d, aR = inp.r; inp.t = inp.m = inp.d = inp.r = false;
     if (this.hs && this.isSeeker(p) && this.hs.ph === 'hide') { mx = my = 0; aT = aM = aD = aR = false; }   // the seeker waits, blindfolded, while the others hide
+    if (p.fall > 0) { mx = my = 0; aT = aM = aD = aR = false; p.dashT = 0; }   // falling: no control
     p.aim = inp.aim;
     let dashing = p.dashT > 0;
     p.tk = false; p.tkx = 0; p.tky = 0;
@@ -484,18 +487,19 @@ class Round {
       if (aD) { p.fz--; this.ev('crack', p.x, p.y); if (p.fz <= 0) { p.frozen = false; p.iceT = 0; p.iceImm = 1.5; } }
       p.disg = -1;
     } else {
-      const tk = this.has(p, 'telekinesis') && inp.dh && p.boom.some(b => b.s !== 'held' && Math.hypot(b.x - p.x, b.y - p.y) < TK_R);
-      p.tk = tk;
-      if (aR && this.set.pullBack) for (const b of p.boom) if (b.s === 'drop' || b.s === 'fly') { b.s = 'ret'; }
+      const tk = false;   // telekinesis never roots you: you keep walking while the mouse flies the boomerang
+      const tkOn = this.has(p, 'telekinesis') && !!inp.rh && !(p.gold) && p.boom.some(b => b.s !== 'held' && !b.dfl);
+      p.tk = tkOn;
+      if (tkOn) { const ad = Math.min(TK_R, clamp(+inp.ad || 0, 0, 2000)); p.tkx = p.x + Math.cos(p.aim) * ad; p.tky = p.y + Math.sin(p.aim) * ad; aR = false; }
+      if (aR && this.set.pullBack) for (const b of p.boom) if (b.s === 'drop' || (b.s === 'fly' && (b.t >= B_OUT * 0.5 || (b.age || 0) >= 0.5))) { b.s = 'ret'; }   // pull back only works once a throw has covered half its range or has been out for 0.5 s
       if (aT && !(p.gold && !this.set.goldThrow) && this.seekerCan(p) && this.doThrow(p)) this.spend(p);
       if (aM && p.slashCd <= 0 && this.seekerCan(p) && this.doSlash(p)) this.spend(p);
       if (aD && !tk && p.dashCd <= 0 && !dashing) this.doDash(p, mx, my);
       dashing = p.dashT > 0;
-      if (tk) { p.tkx = mx; p.tky = my; }
       if (this.has(p, 'disguise') && mx === 0 && my === 0 && !dashing && !aT && !aM) {
         p.still += dt; if (p.still >= (this.hs ? 0.5 : 1) && p.disg < 0) { const ks = this.arena.kinds.length ? this.arena.kinds : ['rock']; p.disg = A.KINDS.indexOf(ks[Math.floor(Math.random() * ks.length)]); }
       } else { p.still = 0; p.disg = -1; }
-      const sp = SPEED * (this.has(p, 'caffeinated') ? 1.45 : 1) * (p.onIce ? 0.5 : 1);
+      const sp = SPEED * (this.hs && this.isSeeker(p) ? SEEKER_SPEED : 1) * (this.has(p, 'caffeinated') ? 1.45 : 1) * (p.onIce ? 0.5 : 1);
       if (dashing) { vx = p.ddx * DASH_SP; vy = p.ddy * DASH_SP; p.dashT -= dt; }
       else if (!tk) { vx = mx * sp; vy = my * sp; }
     }
@@ -504,9 +508,14 @@ class Round {
     p.vx = (p.x - ox) / dt; p.vy = (p.y - oy) / dt;
     if (!(p.dashT > 0) && this.wallHit(p.x, p.y, R_WALL - 2)) this.pushOut(p);
 
-    if (!(p.dashT > 0) && this.deadly(p.x, p.y)) { this.kill(p, null, 'drop'); return; }
-    if (this.inBounds(p.x, p.y)) p.oob = Math.max(0, p.oob - dt * 2);
-    else { p.oob += dt; if (p.oob > 3) { this.kill(p, null, 'oob'); return; } }
+    if (p.fall > 0) { p.fall -= dt; if (p.fall <= 0) { p.fall = 0; this.kill(p, null, p.fcause || 'drop'); return; } }
+    else {
+      if (!(p.dashT > 0) && this.deadly(p.x, p.y)) {   // over water or a pit: the gum shakes first, so there is a moment to get back out
+        p.shk += dt; if (p.shk >= FALL_GRACE) { p.fall = FALL_T; p.fcause = 'drop'; p.shk = 0; p.vx = p.vy = 0; this.ev('fall', p.x, p.y); }
+      } else p.shk = Math.max(0, p.shk - dt * 4);
+      if (this.inBounds(p.x, p.y)) p.oob = Math.max(0, p.oob - dt * 2);
+      else { p.oob += dt; if (p.oob > 3 && !(p.fall > 0)) { p.fall = FALL_T; p.fcause = 'oob'; this.ev('fall', p.x, p.y); } }
+    }
 
     if (this.wetAt(p.x, p.y)) p.burn = 0;
     if (p.burn > 0) {
@@ -586,19 +595,19 @@ class Round {
             if (Math.abs(da) < 1.4 || dist < 26) { this.deflect(b, d); break; }
           }
         }
-        if (p.alive && p.tk && !b.dfl && (b.s === 'fly' || b.s === 'ret') && Math.hypot(b.x - p.x, b.y - p.y) < TK_R) {
-          if (b.s === 'ret') { b.s = 'fly'; b.t = B_OUT * 0.5; }
-          let ang = Math.atan2(b.vy, b.vx);
-          if (Math.hypot(p.tkx, p.tky) > 0.2) {
-            let d = Math.atan2(p.tky, p.tkx) - ang; d = Math.atan2(Math.sin(d), Math.cos(d));
-            ang += clamp(d, -7 * dt, 7 * dt);
-          }
-          b.vx = Math.cos(ang) * this.bSpeed * 0.8 * b.sp; b.vy = Math.sin(ang) * this.bSpeed * 0.8 * b.sp; b.ctl = true;
-        } else b.ctl = false;
-        if (b.s === 'fly') {
+        if (b.tkBreak > 0) b.tkBreak -= dt;
+        if (p.alive && p.tk && !b.dfl && !(b.tkBreak > 0)) {   // telekinesis: the boomerang follows the owner's mouse, but never further than TK_R from them
+          b.s = 'fly'; b.ctl = true; b.t = Math.min(b.t, B_OUT * 0.5); b.sp = 1; b.bn = 0;
+          this.tkMove(p, b, dt);
+          if (Math.hypot(b.x - p.x, b.y - p.y) > 50) b.far = true;
+          else if (b.far && Math.hypot(b.x - p.x, b.y - p.y) < 20) { b.far = false; b.ctl = false; this.catchB(p, b); continue; }
+        } else if (b.ctl) { b.ctl = false; b.far = false; b.tkIn = false; if (b.s === 'fly') { b.s = 'ret'; b.dfl = null; } }   // let go: it flies home
+        if (b.ctl) { /* moved by telekinesis above */ }
+        else if (b.s === 'fly') {
           // The outbound range is counted at full speed, so a slowed (bounced) boomerang still covers the
           // same total distance, just more slowly. That is what lets it reach its 3 bounces and the final wall.
           if (!b.ctl) b.t += dt * b.sp;
+          b.age = (b.age || 0) + dt;
           if (this.set.homing && !b.ctl) this.steer(b, p, dt);
           let px = b.x, py = b.y, stopped = false;
           const n = Math.max(1, Math.ceil(Math.hypot(b.vx, b.vy) * dt / 3));   // sub-steps so it touches walls instead of stopping short
@@ -659,10 +668,40 @@ class Round {
     bl.last = by || bl.last; bl.how = speed > 450 ? (speed === 430 ? 'slash' : 'boom') : 'ret'; this.ev('kick', bl.x, bl.y);
   }
   ballFree(x, y) {
-    if (this.wallHit(x, y, BALL_R)) return false;
-    if (y < BALL_R || y > H - BALL_R) return false;
-    if (x < BALL_R || x > W - BALL_R) { const g = this.arena.goal; return y > g.y1 && y < g.y2; }   // the sides are open only through the goal mouths
-    return true;
+    return !this.ballWalls().some(q => A.circleRect(x, y, BALL_R, q));
+  }
+  // every solid thing the ball can touch: the obstacles, plus the pitch edge (open only through the two goal mouths)
+  ballWalls() {
+    if (this.bw) return this.bw;
+    const g = this.arena.goal, B = 200;
+    return this.bw = this.arena.walls.concat([
+      { x: -B, y: -B, w: W + 2 * B, h: B }, { x: -B, y: H, w: W + 2 * B, h: B },
+      { x: -B, y: 0, w: B, h: g.y1 }, { x: -B, y: g.y2, w: B, h: H - g.y2 },
+      { x: W, y: 0, w: B, h: g.y1 }, { x: W, y: g.y2, w: B, h: H - g.y2 }]);
+  }
+  // push the ball out of everything it overlaps and bounce it off along the true surface normal (so it slides along walls and rolls round corners)
+  ballCollide(bl, rest) {
+    let hit = false;
+    for (let it = 0; it < 4; it++) {
+      let moved = false;
+      for (const q of this.ballWalls()) {
+        const cx = Math.max(q.x, Math.min(bl.x, q.x + q.w)), cy = Math.max(q.y, Math.min(bl.y, q.y + q.h));
+        let dx = bl.x - cx, dy = bl.y - cy, d = Math.hypot(dx, dy), nx, ny, pen;
+        if (d >= BALL_R) continue;
+        if (d > 1e-6) { nx = dx / d; ny = dy / d; pen = BALL_R - d; }
+        else {   // centre inside the rectangle: leave by the nearest side
+          const l = bl.x - q.x, r = q.x + q.w - bl.x, t = bl.y - q.y, bt = q.y + q.h - bl.y, m = Math.min(l, r, t, bt);
+          if (m === l) { nx = -1; ny = 0; } else if (m === r) { nx = 1; ny = 0; } else if (m === t) { nx = 0; ny = -1; } else { nx = 0; ny = 1; }
+          pen = m + BALL_R;
+        }
+        bl.x += nx * pen; bl.y += ny * pen; moved = true;
+        const vn = bl.vx * nx + bl.vy * ny;
+        if (vn < 0) { bl.vx -= (1 + rest) * vn * nx; bl.vy -= (1 + rest) * vn * ny; if (vn < -140) this.ev('bnk', bl.x, bl.y); }
+        hit = true;
+      }
+      if (!moved) break;
+    }
+    return hit;
   }
   scoreGoal(team) {
     const bl = this.bl; this.bScore[team]++; this.bPause = GOAL_PAUSE; bl.vx = bl.vy = 0;
@@ -698,21 +737,40 @@ class Round {
       const nx = d > 0.01 ? dx / d : Math.cos(p.aim), ny = d > 0.01 ? dy / d : Math.sin(p.aim);
       const rel = (p.vx - bl.vx) * nx + (p.vy - bl.vy) * ny;
       if (rel > 0) { bl.vx += nx * rel * 1.25; bl.vy += ny * rel * 1.25; bl.last = p; bl.how = 'body'; }
-      const px = p.x + nx * R, py = p.y + ny * R;
-      if (this.ballFree(px, py)) { bl.x = px; bl.y = py; }
-      else { const vn = bl.vx * nx + bl.vy * ny; if (vn < 0) { bl.vx -= vn * nx; bl.vy -= vn * ny; } }   // pinned against a wall: it just can't be pushed further
+      bl.x = p.x + nx * R; bl.y = p.y + ny * R;
+      this.ballCollide(bl, 0.5);
+      const ex = bl.x - p.x, ey = bl.y - p.y, ed = Math.hypot(ex, ey);   // squeezed between the gum and a wall: it can't be pushed through, so stop it pressing on the gum
+      if (ed < R - 0.5 && ed > 0.01) { const vn = (bl.vx * ex + bl.vy * ey) / ed; if (vn < 0) { bl.vx -= vn * ex / ed; bl.vy -= vn * ey / ed; } }
     }
     let sp = Math.hypot(bl.vx, bl.vy);
     if (sp > BALL_MAX) { bl.vx *= BALL_MAX / sp; bl.vy *= BALL_MAX / sp; sp = BALL_MAX; }
     const n = Math.max(1, Math.ceil(sp * dt / 4)), h = dt / n;
-    for (let i = 0; i < n; i++) {
-      const nx = bl.x + bl.vx * h, ny = bl.y + bl.vy * h;
-      if (this.ballFree(nx, bl.y)) bl.x = nx; else { bl.vx = -bl.vx * 0.75; if (sp > 140) this.ev('bnk', bl.x, bl.y); }
-      if (this.ballFree(bl.x, ny)) bl.y = ny; else { bl.vy = -bl.vy * 0.75; if (sp > 140) this.ev('bnk', bl.x, bl.y); }
-    }
+    for (let i = 0; i < n; i++) { bl.x += bl.vx * h; bl.y += bl.vy * h; this.ballCollide(bl, 0.75); }
+    if (sp < 12) this.ballCollide(bl, 0);
     const f = Math.exp(-BALL_FRIC * dt); bl.vx *= f; bl.vy *= f; if (Math.hypot(bl.vx, bl.vy) < 6) bl.vx = bl.vy = 0;
     const g = this.arena.goal;
     if (bl.y > g.y1 && bl.y < g.y2) { if (bl.x < 10) this.scoreGoal(1); else if (bl.x > W - 10) this.scoreGoal(0); }   // into the left goal scores for team 1 and vice versa
+  }
+
+  // telekinesis: glide the boomerang towards the owner's cursor, sliding along obstacles and staying inside the control radius
+  tkMove(p, b, dt) {
+    const dx = p.tkx - b.x, dy = p.tky - b.y, d = Math.hypot(dx, dy), spd = Math.min(this.bSpeed * 1.1, d * 14);
+    const vx = d > 0.5 ? dx / d * spd : 0, vy = d > 0.5 ? dy / d * spd : 0;
+    let prev = Math.hypot(b.x - p.x, b.y - p.y);
+    if (prev <= TK_R) b.tkIn = true;                                  // once inside the radius it stays inside, even if the owner walks away
+    if (b.tkIn && prev > TK_R) { const k = TK_R / prev, ox = b.x, oy = b.y; b.x = p.x + (b.x - p.x) * k; b.y = p.y + (b.y - p.y) * k; if (this.wallHit(b.x, b.y, B_R)) { b.x = ox; b.y = oy; b.tkIn = false; b.tkBreak = 0.5; return; } prev = Math.hypot(b.x - p.x, b.y - p.y); }   // pulled taut round a corner: the link snaps and it flies home 
+    const lim = b.tkIn ? TK_R : Math.max(TK_R, prev);              // thrown further out than that? it can only come in, never go further out
+    const n = Math.max(1, Math.ceil(spd * dt / 3)); let x = b.x, y = b.y;
+    for (let i = 0; i < n; i++) {
+      let nx = x + vx * dt / n, ny = y + vy * dt / n;
+      let ex = nx - p.x, ey = ny - p.y, ed = Math.hypot(ex, ey);
+      if (ed > lim && ed > 0) { nx = p.x + ex / ed * lim; ny = p.y + ey / ed * lim; }
+      if (nx < 0 || nx > W || ny < 0 || ny > H) { nx = Math.max(0, Math.min(W, nx)); ny = Math.max(0, Math.min(H, ny)); }
+      if (!this.wallHit(nx, ny, B_R)) { x = nx; y = ny; }
+      else if (!this.wallHit(nx, y, B_R)) x = nx;
+      else if (!this.wallHit(x, ny, B_R)) y = ny;
+    }
+    this.trail(p, b, x, y); b.vx = (x - b.x) / dt; b.vy = (y - b.y) / dt; b.x = x; b.y = y;
   }
 
   stepDecoys(dt) {
@@ -1081,7 +1139,7 @@ class Round {
     this.stepHazards(dt);
     this.stepGold(dt);
     this.stepBall(dt);
-    const interval = this.hs ? 0 : { off: 0, slow: 12, normal: 7, fast: 3.5 }[this.set.books];
+    const interval = (this.hs || (this.ball && !this.set.ballPU)) ? 0 : { off: 0, slow: 12, normal: 7, fast: 3.5 }[this.set.books];
     if (interval > 0) { this.bookT -= dt; if (this.bookT <= 0) { if (this.books.length < 5) this.spawnBook(); this.bookT = interval; } }
     for (let i = this.books.length - 1; i >= 0; i--) {
       const k = this.books[i];
@@ -1115,6 +1173,8 @@ class Round {
       // what the owning client needs to keep predicting its own movement from this snapshot
       if (this.golden) { e.gt = +p.goldT.toFixed(1); if (p.gold) e.gh = 1; }
       if ((this.golden || this.ball) && !p.alive) e.rt = +Math.max(0, p.rt).toFixed(1);
+      if (p.shk > 0) e.sv = +Math.min(1, p.shk / FALL_GRACE).toFixed(2);
+      if (p.fall > 0) e.fa = +(1 - p.fall / FALL_T).toFixed(2);
       if (this.ball) e.tm = p.team;
       if (!p.alive && p.gx !== undefined) { e.gx = rnd(p.gx); e.gy = rnd(p.gy); }   // gravestone spot
       if (p.onIce) e.ic = 1;
@@ -1162,7 +1222,7 @@ class Match {
     const p = this.game && this.game.players.find(q => q.id === id); if (!p || p.bot) return;
     const i = p.input;
     i.mx = clamp(+inp.mx || 0, -1, 1); i.my = clamp(+inp.my || 0, -1, 1);
-    i.aim = Number.isFinite(+inp.aim) ? +inp.aim : i.aim; i.dh = !!inp.dh;
+    i.aim = Number.isFinite(+inp.aim) ? +inp.aim : i.aim; i.dh = !!inp.dh; i.rh = !!inp.rh; i.ad = clamp(+inp.ad || 0, 0, 2000);
     if (inp.t) i.t = true; if (inp.m) i.m = true; if (inp.d) i.d = true; if (inp.r) i.r = true;
     p.idle = 0;
     const sq = inp.sq | 0; if (sq > (this.seqs[id] | 0)) this.seqs[id] = sq;
@@ -1219,6 +1279,6 @@ class Match {
   }
 }
 
-const api = { GOLD_TIME, RESPAWN_TIME, Match, Round, VARIANTS, PU_INFO, PU_IDS, BOT_NAMES, B_SPEEDS, DT, BOUNCE_MAX, BOUNCE_SPEED, sanitizeSettings, fillBots, fillTeams, predictStep, BALL_R };
+const api = { GOLD_TIME, RESPAWN_TIME, Match, Round, VARIANTS, PU_INFO, PU_IDS, BOT_NAMES, B_SPEEDS, DT, BOUNCE_MAX, BOUNCE_SPEED, sanitizeSettings, fillBots, fillTeams, predictStep, BALL_R, TK_R, SEEKER_SPEED, FALL_GRACE, FALL_T };
 if (typeof module === 'object' && module.exports) module.exports = api; else root.MGGame = api;
 })(typeof self !== 'undefined' ? self : globalThis);

@@ -141,6 +141,52 @@ const village = tidy(clearPaths([big('roof', 90, 70, 120, 90), big('roof', 230, 
   ...clump(180, 'bush', 480, 560, 4, 26), ...clump(181, ['crate', 'barrel'], 860, 280, 5, 30), ...clump(182, 'bush', 60, 560, 3, 20), ...clump(183, 'barrel', 740, 400, 3, 18), ...clump(184, 'bush', 300, 560, 3, 20), ...clump(185, 'crate', 120, 270, 4, 24), ...clump(186, 'bush', 880, 170, 3, 18)], FL.village), []);
 
 
+// ---- more hide & seek maps, each with a look of its own: snow, autumn, swamp, ash and moonlight ----
+FL.snow = [{ t: 'path', c: 'snowpath', w: 46, pts: [[70, 330], [190, 300], [320, 255], [470, 235], [610, 255], [740, 335], [880, 410]] }, { t: 'path', c: 'snowpath', w: 34, pts: [[320, 255], [290, 150], [380, 95]] }, { t: 'path', c: 'snowpath', w: 34, pts: [[740, 335], [700, 460], [620, 545]] }];
+const snowWater = [r(430, 335, 160, 92), r(210, 445, 90, 56)];
+const snow = tidy(clearPaths([big('roof', 110, 80, 140, 92), big('roof', 690, 450, 150, 100), big('roof', 440, 68, 76, 60),
+  ...stack(770, 150, 3, 2), ...clump(201, 'barrel', 275, 185, 3, 20), ...clump(202, 'crate', 665, 420, 3, 22), ...stack(262, 520, 2, 1, 'crate'),
+  ...clump(203, 'bush', 180, 235, 13, 60), ...clump(204, 'bush', 150, 420, 11, 54), ...clump(205, 'bush', 560, 140, 10, 58), ...clump(206, 'bush', 830, 255, 9, 46), ...clump(207, 'bush', 480, 540, 12, 64),
+  ...clump(208, 'bush', 335, 365, 6, 34), ...clump(209, 'bush', 870, 540, 4, 26), ...clump(210, 'bush', 95, 115, 4, 26), ...clump(218, 'bush', 640, 380, 5, 30), ...clump(219, 'bush', 400, 180, 5, 30),
+  ...clump(211, 'rock', 615, 330, 5, 30), ...clump(212, 'rock', 130, 320, 4, 26), ...clump(213, 'rock', 380, 520, 4, 28), ...clump(214, 'rock', 800, 360, 4, 26), ...clump(215, 'rock', 580, 62, 3, 22),
+  ...clump(216, 'rock', 255, 80, 3, 22), ...clump(217, 'rock', 860, 470, 3, 22)], FL.snow), snowWater);
+
+FL.autumn = [{ t: 'path', c: 'leaf', w: 48, pts: [[70, 540], [200, 500], [330, 440], [470, 380], [560, 290], [640, 210], [760, 175]] }, { t: 'path', c: 'leaf', w: 34, pts: [[330, 440], [250, 330], [180, 262]] }, { t: 'path', c: 'leaf', w: 34, pts: [[560, 290], [720, 335], [860, 325]] }];
+const autumnWater = [r(110, 375, 56, 120), r(740, 470, 110, 64)];
+const autumn = tidy(clearPaths([big('roof', 690, 60, 170, 108), big('roof', 120, 90, 100, 78), big('roof', 455, 70, 64, 56),
+  ...rag('rock', [[250, 70], [330, 108], [430, 150]], 221, 26, 3), ...rag('rock', [[570, 390], [650, 425], [760, 425], [850, 395]], 222, 26, 3), ...rag('rock', [[80, 330], [150, 322], [215, 360]], 223, 26, 3),
+  ...clump(224, 'barrel', 300, 215, 9, 40), ...stack(780, 235, 2, 2), ...stack(255, 545, 3, 1), ...clump(226, 'crate', 560, 150, 4, 30),
+  ...rows(225, 'bush', [430, 505, 580, 655, 730, 805], [470, 525, 575], 70, 0.2, []),
+  ...clump(227, 'bush', 190, 215, 11, 52), ...clump(228, 'bush', 330, 120, 7, 40), ...clump(229, 'bush', 130, 540, 7, 38), ...clump(230, 'bush', 430, 250, 7, 40), ...clump(231, 'bush', 860, 560, 4, 26), ...clump(232, 'bush', 880, 110, 3, 22),
+  ...clump(233, 'rock', 640, 90, 3, 22), ...clump(234, 'rock', 370, 330, 3, 22), ...clump(235, 'rock', 880, 250, 3, 20), ...clump(236, 'barrel', 640, 330, 3, 20)], FL.autumn), autumnWater);
+
+FL.swamp = [{ t: 'path', c: 'plank', w: 34, pts: [[70, 545], [190, 545], [300, 520], [420, 520]] }, { t: 'path', c: 'plank', w: 34, pts: [[420, 520], [420, 440], [340, 405]] }, { t: 'path', c: 'plank', w: 34, pts: [[560, 530], [700, 530], [820, 575]] },
+  { t: 'path', c: 'mud', w: 50, pts: [[70, 300], [200, 335], [310, 325]] }, { t: 'path', c: 'mud', w: 50, pts: [[610, 300], [740, 310], [880, 262]] }];
+const swampWater = [r(120, 120, 180, 96), r(355, 255, 150, 120), r(565, 125, 140, 90), r(655, 385, 150, 100), r(135, 425, 140, 70), r(505, 440, 70, 60)];
+const swamp = tidy(clearPaths([big('roof', 345, 135, 100, 72), big('roof', 780, 90, 96, 78), big('roof', 800, 500, 90, 68),
+  ...clump(241, 'bush', 235, 255, 10, 48), ...clump(242, 'bush', 520, 220, 9, 44), ...clump(243, 'bush', 330, 450, 7, 34), ...clump(244, 'bush', 620, 340, 6, 32), ...clump(245, 'bush', 100, 180, 6, 34), ...clump(246, 'bush', 850, 400, 7, 36),
+  ...clump(247, 'bush', 700, 270, 6, 34), ...clump(248, 'bush', 450, 585, 5, 30), ...clump(249, 'bush', 90, 450, 5, 28), ...clump(250, 'bush', 580, 40 + 40, 5, 30),
+  ...clump(251, 'rock', 270, 330, 4, 26), ...clump(252, 'rock', 760, 560, 4, 28), ...clump(253, 'rock', 520, 100, 3, 24), ...clump(254, 'rock', 880, 190, 3, 20),
+  ...clump(259, 'bush', 330, 85, 6, 34), ...clump(260, 'bush', 760, 250, 6, 34), ...clump(261, 'bush', 260, 480, 6, 30), ...clump(262, 'bush', 540, 400, 5, 26), ...clump(263, 'bush', 880, 480, 4, 24), ...clump(264, 'bush', 400, 590, 4, 26),
+  ...clump(265, 'bush', 700, 560, 5, 30), ...clump(266, 'bush', 80, 80, 4, 24), ...clump(267, 'bush', 450, 120, 5, 30), ...clump(268, 'rock', 640, 480, 3, 22), ...clump(269, 'rock', 130, 560, 3, 22), ...clump(270, 'barrel', 700, 80, 3, 20),
+  ...clump(255, 'barrel', 460, 335, 3, 22), ...clump(256, 'crate', 230, 560, 4, 26), ...stack(340, 60, 2, 1), ...clump(257, 'barrel', 880, 330, 3, 18), ...clump(258, 'crate', 130, 300, 3, 20)], FL.swamp), swampWater);
+
+FL.ash = [{ t: 'path', c: 'ash', w: 50, pts: [[70, 550], [200, 520], [340, 470], [470, 440], [560, 380], [650, 290], [780, 240], [880, 170]] }, { t: 'path', c: 'ash', w: 36, pts: [[340, 470], [300, 350], [240, 265]] }];
+const ashHoles = [r(405, 250, 130, 80), r(150, 405, 110, 64), r(690, 425, 120, 70), r(600, 95, 120, 60)];
+const ash = tidy(clearPaths([big('roof', 100, 80, 110, 84), big('pillar', 560, 515, 110, 26), big('pillar', 560, 515, 26, 66), big('pillar', 780, 70, 26, 100), big('pillar', 780, 70, 90, 26),
+  ...rag('pillar', [[250, 170], [335, 150], [425, 170]], 261, 40, 4), ...rag('pillar', [[700, 340], [790, 365], [860, 335]], 262, 36, 4), ...rag('pillar', [[170, 570], [260, 585]], 263, 36, 3), ...rag('pillar', [[480, 90], [560, 60]], 264, 36, 3),
+  ...clump(265, 'rock', 330, 340, 8, 40), ...clump(266, 'rock', 120, 280, 7, 38), ...clump(267, 'rock', 560, 220, 6, 34), ...clump(268, 'rock', 860, 480, 7, 38), ...clump(269, 'rock', 640, 590, 4, 26), ...clump(270, 'rock', 440, 540, 6, 34),
+  ...clump(271, 'rock', 880, 90, 3, 22), ...clump(272, 'rock', 90, 500, 5, 30), ...clump(273, 'rock', 700, 200, 5, 30), ...clump(274, 'rock', 250, 80, 3, 22),
+  ...clump(275, 'barrel', 400, 380, 4, 22), ...clump(276, 'crate', 780, 560, 4, 26), ...clump(277, 'barrel', 205, 190, 3, 20), ...clump(278, 'pillar', 520, 340, 4, 26), ...clump(279, 'pillar', 120, 380, 3, 22), ...clump(280, 'pillar', 860, 250, 3, 22)], FL.ash), ashHoles);
+
+FL.night = [{ t: 'path', c: 'moss', w: 46, pts: [[70, 330], [200, 330], [330, 330], [470, 330], [600, 320], [730, 300], [880, 300]] }, { t: 'path', c: 'moss', w: 34, pts: [[470, 330], [470, 200], [470, 120]] }, { t: 'path', c: 'moss', w: 34, pts: [[470, 330], [470, 450], [480, 560]] }];
+const nightWater = [r(110, 100, 100, 70)];
+const night = tidy(clearPaths([big('roof', 700, 70, 100, 80), big('roof', 130, 470, 96, 76), big('roof', 800, 440, 90, 70),
+  ...fenceBox('bush', 560, 150, 870, 250, [195, 215]),
+  ...rows(281, 'pillar', [270, 330, 390, 450, 510, 570], [410, 465, 520], 0, 0.28, []), ...rows(282, 'pillar', [250, 310, 370], [150, 205], 0, 0.3, []), ...rows(283, 'pillar', [600, 660, 720, 780, 840], [380, 430, 490, 545], 0, 0.3, []),
+  ...clump(284, 'bush', 130, 250, 7, 40), ...clump(285, 'bush', 390, 80, 6, 36), ...clump(286, 'bush', 860, 330, 4, 26), ...clump(287, 'bush', 100, 570, 5, 30), ...clump(288, 'bush', 330, 590, 4, 26), ...clump(289, 'bush', 580, 575, 5, 30), ...clump(290, 'bush', 880, 560, 3, 22),
+  ...clump(291, 'rock', 200, 120, 3, 22), ...clump(292, 'rock', 540, 290, 3, 24), ...clump(293, 'rock', 500, 70, 3, 22), ...clump(294, 'rock', 70, 430, 3, 22), ...clump(295, 'barrel', 430, 470, 3, 20), ...clump(296, 'crate', 690, 220, 3, 20)], FL.night), nightWater);
+
 // ---- Boomerang Ball pitches: full-screen play area, a goal mouth in the middle of each short side (posts are the little walls), spawns per team
 const GOAL = { y1: 240, y2: 400, depth: 40 };
 const post = q => Object.assign(q, { k: 'post' });
@@ -197,6 +243,11 @@ const specs = [
   { name: 'Center Wall', ball: true, bounds: pitchBounds, walls: [...posts, r(468, 40, 24, 150), r(468, 450, 24, 150), ...quad([r(300, 260, 30, 30)])] },
   { name: 'Crate Yard', ball: true, bounds: pitchBounds, walls: [...posts, ...quad([r(100, 190, 30, 30), r(132, 190, 30, 30), r(100, 222, 30, 30), r(380, 210, 30, 30)])] },
   { name: 'Hedge Pitch', ball: true, bounds: pitchBounds, walls: [...posts, ...quad([r(260, 40, 150, 24), r(430, 120, 24, 70)])] },
+  { name: 'Frozen Pines', hs: 'only', walls: snow, water: snowWater, floors: FL.snow },
+  { name: 'Autumn Hollow', hs: 'only', walls: autumn, water: autumnWater, floors: FL.autumn },
+  { name: 'Mangrove Marsh', hs: 'only', walls: swamp, water: swampWater, floors: FL.swamp },
+  { name: 'Cinder Ruins', hs: 'only', walls: ash, holes: ashHoles, floors: FL.ash },
+  { name: 'Moonlit Graveyard', hs: 'only', walls: night, water: nightWater, floors: FL.night },
 ];
 
 // Look of each map: [theme, ...obstacle kinds]. Obstacles are drawn as these objects, and the Disguise power-up turns
@@ -219,9 +270,11 @@ const META = {
   'Kickoff Meadow': ['meadow', 'rock'], 'Pillar Pitch': ['stone', 'pillar'], 'Center Wall': ['sand', 'crate'], 'Crate Yard': ['sand', 'crate'], 'Hedge Pitch': ['forest', 'bush'],
   'Old Orchard': ['meadow', 'bush', 'crate', 'barrel', 'rock'], 'Boulder Canyon': ['sand', 'rock', 'barrel'], 'Ruined Temple': ['meadow', 'pillar', 'barrel'],
   'Dockside': ['sand', 'crate', 'barrel'], 'Hedge Gardens': ['forest', 'bush', 'rock'], 'Village Market': ['sand', 'crate', 'barrel', 'bush', 'rock'],
+  'Frozen Pines': ['snow', 'bush', 'rock', 'crate', 'barrel'], 'Autumn Hollow': ['autumn', 'bush', 'rock', 'crate', 'barrel'], 'Mangrove Marsh': ['swamp', 'bush', 'rock', 'crate', 'barrel'],
+  'Cinder Ruins': ['ash', 'rock', 'pillar', 'barrel', 'crate'], 'Moonlit Graveyard': ['night', 'pillar', 'bush', 'rock', 'barrel', 'crate'],
 };
 
-const HS_SHARED = ['Dunes A', 'Dunes B', 'Chaos Garden', 'Wet Woods', 'Hedge Maze'];   // standard maps that are also played in hide & seek
+const HS_SHARED = [];   // standard maps that are also played in hide & seek
 function build(s) {
   const m = META[s.name] || ['meadow', 'rock'], kinds = m.slice(1);
   const a = { name: s.name, bl: !!s.ball, hs: s.hs || (HS_SHARED.includes(s.name) ? 'both' : ''), w: W, h: H, theme: m[0], bounds: s.bounds || r(60, 50, 840, 540), walls: (s.walls || []).map((q, i) => ({ x: q.x, y: q.y, w: q.w, h: q.h, k: q.k || (s.mix ? kinds[i % kinds.length] : kinds[0]) })), water: s.water || [], floors: s.floors || [], holes: s.holes || [], wet: (s.wet || []).slice(), puddles: (s.wet || []).slice() };

@@ -141,7 +141,7 @@ wss.on('connection', ws => {
     switch (m.t) {
       case 'input': {   // the hot path: checked first and kept tiny
         const r = c.room;
-        if (r && r.match) r.match.input(c.id, { mx: m.mx, my: m.my, aim: m.aim, dh: m.dh, t: m.tt, m: m.mm, d: m.dd, r: m.rr, sq: m.sq });
+        if (r && r.match) r.match.input(c.id, { mx: m.mx, my: m.my, aim: m.aim, dh: m.dh, rh: m.rh, ad: m.ad, t: m.tt, m: m.mm, d: m.dd, r: m.rr, sq: m.sq });
         break;
       }
       case 'ping': send(ws, { t: 'pong', c: +m.c || 0 }); break;   // answered immediately, outside the game loop

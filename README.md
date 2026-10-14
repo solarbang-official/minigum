@@ -71,12 +71,11 @@ WebSocket upgrades (the client uses `wss://` automatically on https pages). Ngin
 - **Hide & Seek** (Scoring mode): each player takes one turn as the seeker (round 1 = first player, and so on). The seeker's screen is
   blacked out for 10 s while everyone else hides, using the Disguise power-up they are given (hiders have no boomerang and cannot
   attack). After 10 s every hider turns into a prop from the current map and the seeker has to work out which props are really
-  players. The hiders win the round if they stay hidden until the timer ends (*Hiders win after*, default 60 s); the seeker wins by
+  players. The hiders win the round if they stay hidden until the timer ends (*Hiders win after*, default 120 s); the seeker wins by
   finding everyone. Scoring is by round wins: the seeker wins a round (1 point) by finding everyone, and every hider still hidden when the timer ends wins the round (1 point each). The first to reach *Wins needed to win the match* (default 7) takes the match. The first seeker is chosen at random, then seekers keep rotating round after round until someone gets there. If several players reach the target in the same round they go to **sudden death**: a normal free-for-all round with the Battle Royale power-up already active from the start (the arena begins shrinking immediately); last one standing wins the match, and a draw just replays it. Everyone who did not reach the target spectates the sudden-death round. *Seeker melee + throw limit*
   (default 12) caps swings and throws; each hider found gives back 3 uses; 0 = unlimited. Out of uses = hiders win. The seeker first gets 6 s to look at the empty map (no other player is shown),
   then the screen goes dark for the remaining 4 s of hiding. Hide & Seek has its own hand-built, asymmetric maps (Old Orchard, Boulder Canyon, Ruined Temple, Dockside, Hedge Gardens, Village Market:
-  paths, buildings, groves, rubble and dozens of 30x30 props that hiders can copy) plus five shared standard maps (Dunes A/B, Chaos Garden,
-  Wet Woods, Hedge Maze). The map picker only lists the maps that suit the selected mode. Blue books, power-up carry-over and the shrinking arena are off in this mode. Gums pass through each other (no pushing) and a hider needs only half a second of standing still to turn into a prop. Computer-controlled seekers and hiders find their way round obstacles with a small A* path-finder instead of bumping into them. A boomerang that lands somewhere nobody could stand, or outside the play area, goes straight back to its owner.
+  paths, buildings, groves, rubble and dozens of 30x30 props that hiders can copy) plus five more with different themes (Frozen Pines, Autumn Hollow, Mangrove Marsh, Cinder Ruins, Moonlit Graveyard). No standard map is used in Hide & Seek any more. The map picker only lists the maps that suit the selected mode. Blue books, power-up carry-over and the shrinking arena are off in this mode. Gums pass through each other (no pushing) and a hider needs only half a second of standing still to turn into a prop. Computer-controlled seekers and hiders find their way round obstacles with a small A* path-finder instead of bumping into them. A boomerang that lands somewhere nobody could stand, or outside the play area, goes straight back to its owner.
 - **Boomerang Ball** (Scoring mode): two teams (blue and red, up to 3 a side) push a ball from the centre of a pitch into the other team's goal.
   A flying boomerang punts the ball along its path, a slash smacks it, and running or dashing into it carries it. There is no friendly fire, and a
   gum that is hit respawns after a few seconds. After a goal everyone resets to a kickoff. A team wins by reaching *Goals to win* (default 3) or by leading
@@ -84,8 +83,13 @@ WebSocket upgrades (the client uses `wss://` automatically on https pages). Ngin
   level at the whistle, the next goal wins. *Players per team* can be 1v1, 2v2, 3v3 or "just enough": bots always fill the empty spots so the teams are even
   (an odd number of players gets a bot). *Teams are picked by* **the players** (everyone chooses blue or red in the lobby) or **the host** (the host assigns
   players, with a Shuffle button); anyone without a side is balanced automatically. Five pitches are used (Kickoff Meadow, Pillar Pitch, Center Wall,
-  Crate Yard, Hedge Pitch). Blue books are available, power-up carry-over, underdog shield and the shrinking arena are off, and the bots count field
+  Crate Yard, Hedge Pitch). Power-ups are off by default (no blue books; the host can tick *Power-ups (blue books)* to bring them back), power-up carry-over, underdog shield and the shrinking arena are off, and the bots count field
   is hidden because bots are decided by the team sizes.
+- **Falling**: standing over water or a pit (or outside the arena for 3 s) makes your gum shake violently for about half a second, which is your chance to walk or dash out. If you stay, it shrinks and spins away (about three quarters of a second, no control) and you are out.
+- **Pull Back** (when enabled) only starts working once a thrown boomerang has covered at least half of its range or has been out for 0.5 s (a dropped boomerang can always be pulled). Deflecting a boomerang with a slash plays a distinct ringing parry sound.
+- Bots get a random name and a random colour (not shared with anyone else) every match.
+- **Hide & Seek tweaks**: a hider who has already turned into a prop keeps that prop when the seeking starts (only hiders who were still moving get a random one); the seeker walks at 0.8x speed.
+- **Boomerang Ball physics**: the ball collides with obstacles as a true circle: it bounces off along the surface, slides along walls and rolls round corners, and can't be pushed into or stuck inside one.
 - Computer players that are stuck without their boomerang walk straight over to it (or to a nearby blue book). Picking up a blue book
   also returns any of your boomerangs that are out.
 - **Golden holder can throw it** (default off = melee only): the carrier's boomerang is always gold, whatever their gum.
@@ -105,7 +109,7 @@ WebSocket upgrades (the client uses `wss://` automatically on https pages). Ngin
 | Melee slash | right click / K |
 | Dash | Space / Shift |
 | Recall dropped boomerangs | E / R |
-| Telekinesis steering | hold Dash + move |
+| Telekinesis (power-up) | hold the pull-back key (or hold left click when you have no boomerang to throw) and move the mouse; release and the boomerang flies home. It can't be taken more than 280 px from you |
 
 ## Options (single-player and lobby)
 
