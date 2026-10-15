@@ -11,6 +11,15 @@ const R_P = 14, R_WALL = 9, SPEED = 200, DASH_SP = 560, DASH_T = 0.18, DASH_CD =
 const FALL_GRACE = 0.55, FALL_T = 0.75;   // standing over water or a pit: shake for 0.55 s (time to step out), then fall (shrinking and spinning) for 0.75 s
 const B_OUT = 0.6, B_RET = 620, B_R = 7, TK_R = 280, EXPL_R = 80;
 const SLASH_T = 0.22;
+const SLASH_R = 76, SLASH_ARC = 1.75;   // melee reach (px) and half-arc (rad)
+const PB_W = 152, PB_PAD = 60;          // boomerang ball penalty boxes: how far they reach out from the goal line, and how far past the goal posts they extend
+function penaltyBoxes(arena) { const g = arena.goal; if (!g) return []; const y = g.y1 - PB_PAD, h = g.y2 - g.y1 + 2 * PB_PAD; return [{ x: 0, y, w: PB_W, h }, { x: W - PB_W, y, w: PB_W, h }]; }
+const boxCache = new WeakMap();
+// the pitch as seen by walking gums when the penalty boxes are closed: the same arena with the two boxes added as solid blocks
+const navBoxCache = new WeakMap();
+// the same, with the boxes padded a little: bots plan their routes round this so they don't scrape along the edge of a closed box
+function navBoxArena(arena) { let b = navBoxCache.get(arena); if (!b) { b = Object.assign({}, arena, { walls: arena.walls.concat(penaltyBoxes(arena).map(q => q.x === 0 ? { x: q.x, y: q.y - 12, w: q.w + 12, h: q.h + 24 } : { x: q.x - 12, y: q.y - 12, w: q.w + 12, h: q.h + 24 })) }); navBoxCache.set(arena, b); } return b; }
+function boxArena(arena) { let b = boxCache.get(arena); if (!b) { b = Object.assign({}, arena, { walls: arena.walls.concat(penaltyBoxes(arena)) }); boxCache.set(arena, b); } return b; }
 const DT = 1 / 60;                          // fixed simulation step: server, offline single-player and client prediction all use it
 const SEEKER_SPEED = 0.8;   // hide & seek: the seeker walks at 0.8x
 const BOUNCE_MAX = 3, BOUNCE_SPEED = 0.5;   // a boomerang can bounce off walls 3 times, losing half its speed each time, then stops at the next wall
@@ -61,7 +70,7 @@ function sanitizeSettings(s) {
   else if (Number.isInteger(s.arena) && s.arena >= 0 && s.arena < A.list.length) o.arenas = [s.arena];   // older single-map setting
   else o.arenas = all;
   if (o.arenas.length === 0) o.arenas = all;   // nothing ticked = every map
-  o.mode = ['kill', 'golden', 'hide', 'ball'].includes(s.mode) ? s.mode : 'last';
+  o.mode = ['kill', 'golden', 'hide', 'ball', 'tdm'].includes(s.mode) ? s.mode : 'last';
   o.target = clamp(parseInt(s.target) || 5, 1, 25);
   o.books = ['off', 'slow', 'normal', 'fast'].includes(s.books) ? s.books : 'normal';
   o.boomSpeed = ['slow', 'normal', 'fast', 'insane'].includes(s.boomSpeed) ? s.boomSpeed : 'normal';
@@ -77,6 +86,7 @@ function sanitizeSettings(s) {
   const bt = parseInt(s.ballTime); o.ballTime = BALL_TIMES.includes(bt) ? bt : 360;            // boomerang ball: match length in seconds
   o.ballPU = !!s.ballPU;   // boomerang ball: blue books (power-ups) are off unless the host turns them on
   const mt = parseInt(s.myTeam); o.myTeam = mt === 1 ? 1 : mt === -1 ? -1 : 0;   // single-player boomerang ball: which team you are on (-1 = random)
+  o.noBox = !!s.noBox;     // boomerang ball: nobody may walk into the penalty boxes round the goals (boomerangs and the ball still can)
   o.teamSel = s.teamSel === 'host' ? 'host' : 'players';                                         // boomerang ball: who picks the teams
   const bz = parseInt(s.ballSize); o.ballSize = Number.isNaN(bz) ? 0 : clamp(bz, 0, 3);          // boomerang ball: players per team (0 = just enough, bots fill empty spots)
   o.puCarry = !!s.puCarry;       // power-ups carry over into the next round
@@ -169,14 +179,15 @@ class Round {
     this.time = 0; this.lastSD = 60; this.events = []; this.over = false; this.winner = null;
     this.hazards = []; this.books = []; this.decoys = []; this.dcN = 0; this.bookT = 2.5;
     this.golden = set.mode === 'golden'; this.gold = null;
-    this.ball = set.mode === 'ball'; this.bl = null; this.bScore = [0, 0]; this.bLeft = set.ballTime; this.bPause = 0; this.bOT = false; this.bWinner = -1; const tcount = [0, 0];
+    this.ball = set.mode === 'ball'; this.tdm = set.mode === 'tdm'; this.teams = this.ball || this.tdm; this.tWin = -1; this.parena = (this.ball && set.noBox) ? boxArena(a) : a; this.narena = (this.ball && set.noBox) ? navBoxArena(a) : a; this.bl = null; this.bScore = [0, 0]; this.bLeft = set.ballTime; this.bPause = 0; this.bOT = false; this.bWinner = -1; const tcount = [0, 0];
     const order = [0, 1, 2, 3, 4, 5].sort(() => Math.random() - 0.5);
     const maxS = Math.max(0, ...infos.map(i => scores[i.id] || 0));
 
+    const tdmSp = this.tdm ? (() => { const q = a.spawns.slice().sort((m, n) => m[0] - n[0]), l = q.slice(0, 3), r = q.slice(3, 6); return Math.random() < 0.5 ? l.concat(r) : r.concat(l); })() : null;   // team deathmatch: one team starts on each side of the map
     this.players = infos.map((inf, i) => {
-      const tmI = inf.team === 1 ? 1 : 0, sp = this.ball ? a.spawns[tmI * 3 + (tcount[tmI]++) % 3] : a.spawns[order[i]];
+      const tmI = inf.team === 1 ? 1 : 0, sp = this.ball ? a.spawns[tmI * 3 + (tcount[tmI]++) % 3] : this.tdm ? tdmSp[tmI * 3 + (tcount[tmI]++) % 3] : a.spawns[order[i]];
       const carryPUs = (savedPUs && savedPUs[inf.id]) ? savedPUs[inf.id].slice() : [];
-      const p = { id: inf.id, team: this.ball ? tmI : -1, idx: i, name: inf.name, bot: !!inf.bot, variant: inf.variant, x: sp[0], y: sp[1], vx: 0, vy: 0,
+      const p = { id: inf.id, team: this.teams ? tmI : -1, idx: i, name: inf.name, bot: !!inf.bot, variant: inf.variant, x: sp[0], y: sp[1], vx: 0, vy: 0,
         aim: Math.atan2(320 - sp[1], 480 - sp[0]), alive: true, pu: carryPUs, boom: [], invuln: 0, dashT: 0, dashCd: 0, ddx: 0, ddy: 0,
         slash: 0, slashCd: 0, burn: 0, burner: null, iceT: 0, frozen: false, fz: 0, iceImm: 0, onIce: false, bam: 0, still: 0, disg: -1,
         oob: 0, shk: 0, fall: 0, fcause: null, tk: false, tkx: 0, tky: 0, cause: null, ai: null, idle: 0, gold: false, goldT: 0, rt: 0,
@@ -270,10 +281,10 @@ class Round {
     return false;
   }
   targets() { const o = []; for (const p of this.players) if (p.alive) o.push(p); for (const d of this.decoys) if (d.alive) o.push(d); return o; }
-  enemiesOf(p) { return this.targets().filter(t => t !== p && !(t.dc && t.owner === p)); }
+  enemiesOf(p) { return this.targets().filter(t => t !== p && !(t.dc && t.owner === p) && !(this.teams && (t.dc ? t.owner.team : t.team) === p.team)); }
 
   hit(t, by, cause, b) {
-    if (this.ball && by && by !== t && (t.dc ? t.owner.team : t.team) === by.team) {   // boomerang ball: no friendly fire (but it is noted for the accolades)
+    if (this.teams && by && by !== t && (t.dc ? t.owner.team : t.team) === by.team) {   // team modes: no friendly fire (but it is noted for the accolades)
       const key = by.id + '>' + t.id; if (this.time - (this.th[key] === undefined ? -9 : this.th[key]) > 0.6) this.bump(by, 'teamHits'); this.th[key] = this.time;
       return;
     }
@@ -366,6 +377,7 @@ class Round {
       if (p.gold) { p.gold = false; const g = this.gold; g.holder = null; const sp = this.freeSpot(p.gx, p.gy); g.x = sp[0]; g.y = sp[1]; this.ev('gdrop', g.x, g.y); }
     }
     this.ev('die', p.x, p.y, cause === 'drop' || cause === 'oob' ? 1 : 0);
+    if (!this.hs && !this.over) this.ev('kill_ann', by && by !== p && cause !== 'drop' && cause !== 'oob' ? by.id : '', by && by !== p && cause !== 'drop' && cause !== 'oob' ? by.name : '', p.id, p.name, cause, by && by !== p ? by.team : -1, p.team);   // shown on screen like a power-up pickup
     for (const b of p.boom) if (b.s !== 'held') { b.s = 'drop'; b.vx = b.vy = 0; b.fuse = -1; b.dfl = null; }
     if (this.hs && by && this.isSeeker(by) && p !== by && cause !== 'drop' && cause !== 'oob') {
       if (!this.hs.unl) by.uses += HIDE_REFUND;
@@ -394,13 +406,13 @@ class Round {
     if (!p.boom.some(b => b.s === 'held')) return false;
     p.slash = SLASH_T; p.slashCd = 0.45; p.disg = -1; p.still = 0; let hitAny = false; this.bump(p, 'slashes');
     this.ev('sl', p.x, p.y);
-    if (this.bl && this.bPause <= 0) { const bl = this.bl, dx = bl.x - p.x, dy = bl.y - p.y, d = Math.hypot(dx, dy); let da = Math.atan2(dy, dx) - p.aim; da = Math.atan2(Math.sin(da), Math.cos(da)); if (d < 34 + BALL_R && (Math.abs(da) < 1.3 || d < 30)) { this.kick(Math.cos(p.aim), Math.sin(p.aim), 430, 0.2, p, 'slash'); hitAny = true; } }
+    if (this.bl && this.bPause <= 0) { const bl = this.bl, dx = bl.x - p.x, dy = bl.y - p.y, d = Math.hypot(dx, dy); let da = Math.atan2(dy, dx) - p.aim; da = Math.atan2(Math.sin(da), Math.cos(da)); if (d < SLASH_R - 14 + BALL_R && (Math.abs(da) < SLASH_ARC || d < 34)) { this.kick(Math.cos(p.aim), Math.sin(p.aim), 430, 0.2, p, 'slash'); hitAny = true; } }
     for (const t of this.targets()) {
       if (t === p || (t.dc && t.owner === p)) continue;
       const dx = t.x - p.x, dy = t.y - p.y, d = Math.hypot(dx, dy);
-      if (d > 52) continue;
+      if (d > SLASH_R) continue;
       let da = Math.atan2(dy, dx) - p.aim; da = Math.atan2(Math.sin(da), Math.cos(da));
-      if (Math.abs(da) < 1.3 || d < 22) { this.hit(t, p, 'melee'); hitAny = true; }
+      if (Math.abs(da) < SLASH_ARC || d < 26) { this.hit(t, p, 'melee'); hitAny = true; }
     }
     if (!hitAny) this.bump(p, 'whiffs');
     return true;
@@ -505,7 +517,7 @@ class Round {
     }
   }
 
-  moveP(o, dx, dy, ghost) { moveCircle(this.arena, o, dx, dy, ghost); }
+  moveP(o, dx, dy, ghost) { moveCircle(this.parena, o, dx, dy, ghost); }
 
   stepPlayer(p, dt) {
     const inp = p.input;
@@ -555,7 +567,7 @@ class Round {
       if (p.disg >= 0) s.disgT += dt;
       if (!(this.hs && !this.isSeeker(p)) && !p.boom.some(q => q.s === 'held' && !q.temp)) s.emptyT += dt;
     }
-    if (!(p.dashT > 0) && this.wallHit(p.x, p.y, R_WALL - 2)) this.pushOut(p);
+    if (!(p.dashT > 0) && wallHitA(this.parena, p.x, p.y, R_WALL - 2)) pushOutOf(this.parena, p);
 
     if (p.fall > 0) { p.fall -= dt; if (p.fall <= 0) { p.fall = 0; this.kill(p, null, p.fcause || 'drop'); return; } }
     else {
@@ -583,7 +595,7 @@ class Round {
       p.onIce = false;
       for (const h of this.hazards) {
         if (Math.hypot(h.x - p.x, h.y - p.y) > 17) continue;
-        if (h.owner === p || (this.ball && h.owner.team === p.team)) continue;   // your own fire and ice never hurt you (e.g. when your boomerang flies back through its trail)
+        if (h.owner === p || (this.teams && h.owner.team === p.team)) continue;   // your own fire and ice never hurt you (e.g. when your boomerang flies back through its trail)
         if (h.type === 0) { if (p.burn <= 0 && !this.wetAt(p.x, p.y)) { p.burn = 4; p.burner = h.owner; this.bump(h.owner, 'burns'); this.ev('burn', p.x, p.y); } }
         else { p.onIce = true; p.iceBy = h.owner; }
       }
@@ -637,11 +649,11 @@ class Round {
         if (b.dflT > 0) b.dflT -= dt;
         if ((b.s === 'fly' || b.s === 'ret') && !(b.dflT > 0)) {
           for (const d of this.players) {
-            if (d === p || d === b.dfl || !d.alive || !(d.slash > 0) || (this.ball && d.team === p.team)) continue;
+            if (d === p || d === b.dfl || !d.alive || !(d.slash > 0) || (this.teams && d.team === p.team)) continue;
             const dx = b.x - d.x, dy = b.y - d.y, dist = Math.hypot(dx, dy);
-            if (dist > 52) continue;
+            if (dist > SLASH_R) continue;
             let da = Math.atan2(dy, dx) - d.aim; da = Math.atan2(Math.sin(da), Math.cos(da));
-            if (Math.abs(da) < 1.4 || dist < 26) { this.deflect(b, d); break; }
+            if (Math.abs(da) < SLASH_ARC + 0.1 || dist < 30) { this.deflect(b, d); break; }
           }
         }
         if (b.tkBreak > 0) b.tkBreak -= dt;
@@ -859,7 +871,7 @@ class Round {
   navInit() {
     if (this.nav) return this.nav;
     const cs = 12, gw = Math.ceil(W / cs), gh = Math.ceil(H / cs), ok = new Uint8Array(gw * gh);
-    for (let i = 0; i < gw; i++) for (let j = 0; j < gh; j++) { const x = i * cs + cs / 2, y = j * cs + cs / 2; ok[i * gh + j] = A.freeAt(this.arena, x, y, 15, this.bounds) && !this.deadlyR(x, y, 18) ? 1 : 0; }
+    for (let i = 0; i < gw; i++) for (let j = 0; j < gh; j++) { const x = i * cs + cs / 2, y = j * cs + cs / 2; ok[i * gh + j] = A.freeAt(this.narena, x, y, 15, this.bounds) && !this.deadlyR(x, y, 18) ? 1 : 0; }
     const comp = new Int16Array(gw * gh).fill(-1), sizes = [];
     for (let i0 = 0; i0 < gw; i0++) for (let j0 = 0; j0 < gh; j0++) if (ok[i0 * gh + j0] && comp[i0 * gh + j0] < 0) {
       const id = sizes.length, st = [[i0, j0]]; let c = 0; comp[i0 * gh + j0] = id;
@@ -910,9 +922,9 @@ class Round {
     const out = []; for (let id = goalId; id >= 0; id = par[id]) out.push([Math.floor(id / gh) * cs + cs / 2, id % gh * cs + cs / 2]);
     return out.reverse();
   }
-  clearLine(x1, y1, x2, y2) {
-    const d = Math.hypot(x2 - x1, y2 - y1), n = Math.ceil(d / 6);
-    for (let i = 1; i <= n; i++) { const t = i / n, x = x1 + (x2 - x1) * t, y = y1 + (y2 - y1) * t; if (!A.freeAt(this.arena, x, y, 15, this.bounds) || this.deadlyR(x, y, 16)) return false; }
+  clearLine(x1, y1, x2, y2, arena) {   // arena: pass this.arena to ignore the closed penalty boxes (boomerangs and the ball fly over them)
+    const d = Math.hypot(x2 - x1, y2 - y1), n = Math.ceil(d / 6), ar = arena || this.parena;
+    for (let i = 1; i <= n; i++) { const t = i / n, x = x1 + (x2 - x1) * t, y = y1 + (y2 - y1) * t; if (!A.freeAt(ar, x, y, 15, this.bounds) || this.deadlyR(x, y, 16)) return false; }
     return true;
   }
   followPath(p, ai) {
@@ -940,7 +952,7 @@ class Round {
     wx /= wl; wy /= wl; let best = null, bs = -9;
     for (let k = 0; k < 16; k++) {
       const a = k * Math.PI / 8, cx = Math.cos(a), cy = Math.sin(a), px = p.x + cx * 34, py = p.y + cy * 34;
-      if (this.wallHit(px, py, R_P + 2) || this.deadlyR(px, py, R_P) || !this.inBounds(px, py, 4)) continue;
+      if (wallHitA(this.parena, px, py, R_P + 2) || this.deadlyR(px, py, R_P) || !this.inBounds(px, py, 4)) continue;
       const sc = cx * wx + cy * wy; if (sc > bs) { bs = sc; best = [cx, cy]; }
     }
     if (best && bs > -0.2) { inp.mx = best[0]; inp.my = best[1]; }
@@ -948,15 +960,27 @@ class Round {
   // boomerang ball bots: whoever is nearest the ball is the striker and lines up behind it so a throw sends it at the enemy goal;
   // the others hold a spot between the ball and their own goal, and anyone with a clear shot that pushes the ball the right way takes it
   aiBall(p, dt, ai) {
-    const inp = p.input, lvl = this.set.ai, bl = this.bl, T = p.team, foe = T === 0 ? W : 0, home = T === 0 ? 0 : W;
+    const inp = p.input, lvl = this.set.ai, bl = this.bl, T = p.team, foe = T === 0 ? W : 0, home = T === 0 ? 0 : W, dirF = T === 0 ? 1 : -1, nb = !!this.set.noBox, ar = this.parena;
     const held = p.boom.some(b => b.s === 'held' && !b.temp), angd = (a, b) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
     const toward = (x, y) => this.steerMove(p, x - p.x, y - p.y);
+    const inBox = (x, y, m) => nb && penaltyBoxes(this.arena).some(q => x > q.x - m && x < q.x + q.w + m && y > q.y - m && y < q.y + q.h + m);
     inp.aim = Math.atan2(bl.y - p.y, bl.x - p.x);
     if (this.bPause > 0) { const sp = this.arena.spawns[T * 3]; toward(sp[0], sp[1]); return; }
-    const mates = this.players.filter(q => q.team === T && q.alive);
+    const mates = this.players.filter(q => q.team === T && q.alive), foes = this.players.filter(q => q.team !== T && q.alive);
     let striker = p, sd = 1e9; for (const q of mates) { const d = Math.hypot(q.x - bl.x, q.y - bl.y); if (d < sd - 1) { sd = d; striker = q; } }
+    if (!striker.bot && sd > 110) { let bd = 1e9; for (const q of mates) if (q.bot) { const d = Math.hypot(q.x - bl.x, q.y - bl.y); if (d < bd) { bd = d; striker = q; } } }   // a human teammate who is nowhere near the ball does not count: the nearest bot goes for it
+    const rank = mates.filter(q => q !== striker).sort((a, b) => Math.hypot(a.x - bl.x, a.y - bl.y) - Math.hypot(b.x - bl.x, b.y - bl.y)).indexOf(p);   // 0 = second closest to the ball
     const toG = Math.atan2(320 - bl.y, foe - bl.x), dME = Math.hypot(bl.x - p.x, bl.y - p.y), meToBall = Math.atan2(bl.y - p.y, bl.x - p.x);
     const tol = [0.42, 0.3, 0.2][lvl], err = angd(meToBall, toG), clear = !this.blocked(p.x, p.y, bl.x, bl.y);
+    // is the ball a threat to our goal (close to it, or rolling at it)? is their goal open (nobody defending it)?
+    const dHome = Math.hypot(bl.x - home, bl.y - 320), rolling = Math.abs(bl.vx) > 110 && bl.vx * (home - bl.x) > 0;
+    const danger = dHome < 290 || (rolling && dHome < 470);
+    const open = !foes.some(e => Math.abs(e.x - foe) < 300 && Math.abs(e.y - 320) < 210);
+    // stall breaker: a bot that has made no real progress for a second stops being clever for a while and goes straight at the ball
+    const spt = ai.sp || (ai.sp = { x: p.x, y: p.y, t: 0, lock: 0 });
+    spt.t += dt; spt.lock = Math.max(0, spt.lock - dt);
+    if (spt.t >= 1) { if (Math.hypot(p.x - spt.x, p.y - spt.y) < 40 && !(held && p.slashCd > 0)) spt.lock = 1.6; spt.x = p.x; spt.y = p.y; spt.t = 0; }
+    const stalled = spt.lock > 0;
     let acted = false;
     // a boomerang lying on the ground: fetch it
     let stuck = null, sdd = 1e9; for (const q of p.boom) if (q.s === 'drop') { const d = Math.hypot(q.x - p.x, q.y - p.y); if (d < sdd) { sdd = d; stuck = q; } }
@@ -965,34 +989,77 @@ class Round {
       if (this.set.pullBack && Math.random() < dt * 4) inp.r = true; acted = true;
     }
     if (!acted) {
+      if (danger && !(open && dHome > 200 && p !== striker)) {
+        // our goal is under threat: knock the ball out of the danger zone. A thrown boomerang sends it along its flight path, so throw from the goal side of the ball.
+        const side = bl.y >= 320 ? 1 : -1, out = Math.atan2((bl.y + side * 90 > 600 || bl.y + side * 90 < 40 ? bl.y - side * 60 : bl.y + side * 90) - bl.y, bl.x + dirF * 260 - bl.x);   // upfield and away from the goal mouth
+        ai.clrT = Math.max(0, (ai.clrT || 0) - dt);
+        if (p === striker || dME < 190 || ai.clrT > 0) {   // (the timer stops a bot hovering on the 190 px line, flipping between clearing and defending every frame)
+          ai.clrT = 0.7;
+          const gc = Math.atan2(bl.y - 320, bl.x - home), away = Math.cos(meToBall - gc);   // > 0: a hit along the line from me through the ball pushes it away from our goal
+          const good = angd(meToBall, out) < 0.95 || away > 0.45, lineOk = clear && dME > 36 && dME < 380;
+          if (held && lineOk && good && ai.cool <= 0 && !p.gold) { inp.aim = meToBall + (Math.random() - 0.5) * 2 * [0.12, 0.07, 0.03][lvl]; inp.t = true; ai.cool = [1, 0.7, 0.45][lvl] + Math.random() * 0.3; acted = true; }
+          else if (held && dME < SLASH_R - 6 && p.slashCd <= 0 && (angd(meToBall, out) < 1.6 || away > 0.2)) { inp.aim = angd(meToBall, out) < 1.6 ? out : meToBall; inp.m = true; acted = true; }   // a swat sends it along the aim, so from beside the ball aim up the pitch
+          else if (!held && dME < 60 && angd(meToBall, out) < 1.3) { toward(bl.x + Math.cos(out) * 40, bl.y + Math.sin(out) * 40); acted = true; }
+          if (!acted) {   // get onto the goal side of the ball, on a line that sends it out
+            let tx = bl.x - Math.cos(out) * 120, ty = bl.y - Math.sin(out) * 120;
+            let okp = false;
+            for (const rot of [0, 0.5, -0.5, 1, -1]) { const x = bl.x - Math.cos(out + rot) * 120, y = bl.y - Math.sin(out + rot) * 120; if (A.freeAt(ar, x, y, 18, this.bounds) && !inBox(x, y, 20)) { tx = x; ty = y; okp = true; break; } }
+            if (!okp || stalled) {   // the ball is up against the end line (or the box is closed): no room behind it, so come in from the side and swat or throw it up the pitch
+              let bd = 1e9;
+              for (const rad of [55, 110, 180, 260]) for (let k = 0; k < 16; k++) {
+                const a = k * Math.PI / 8, x = bl.x + Math.cos(a) * rad, y = bl.y + Math.sin(a) * rad; if (!A.freeAt(ar, x, y, 18, this.bounds) || inBox(x, y, 12)) continue;
+                const dir = Math.atan2(bl.y - y, bl.x - x); if (angd(dir, out) > 0.95 && Math.cos(dir - gc) < 0.45) continue;   // must push it up the pitch or away from our goal
+                if (rad > 60 && this.blocked(x, y, bl.x, bl.y)) continue;
+                const d = Math.hypot(x - p.x, y - p.y) + rad * 0.3; if (d < bd) { bd = d; tx = x; ty = y; okp = true; }
+              }
+            }
+            const r = this.walkTo(p, ai, 'bc', (x, y) => Math.hypot(x - tx, y - ty), 22, dt); if (r === 'nopath') toward(tx, ty);
+            acted = true;
+          }
+        }
+      }
+    }
+    if (!acted) {
       if (p === striker) {
         let sx = 0, sy = 0, found = false;
-        for (const back of [190, 150, 110, 80]) { sx = bl.x - Math.cos(toG) * back; sy = bl.y - Math.sin(toG) * back; if (A.freeAt(this.arena, sx, sy, 18, this.bounds) && this.clearLine(sx, sy, bl.x, bl.y)) { found = true; break; } }
+        for (const back of [190, 150, 110, 80]) { sx = bl.x - Math.cos(toG) * back; sy = bl.y - Math.sin(toG) * back; if (A.freeAt(ar, sx, sy, 18, this.bounds) && !inBox(sx, sy, 16) && this.clearLine(sx, sy, bl.x, bl.y, this.arena)) { found = true; break; } }
         if (!found) { sx = bl.x - Math.cos(toG) * 60; sy = bl.y - Math.sin(toG) * 60; }
-        const inShot = held && err < tol && dME > 50 && dME < 300 && clear;
+        const shotTol = open ? tol * 1.7 : tol, inShot = held && err < shotTol && dME > 50 && dME < (open ? 420 : 300) && clear;
         if (!inShot) {
-          if (held && dME < 50 && angd(meToBall, toG) < 0.9 && p.slashCd <= 0) { inp.aim = toG; inp.m = true; }   // right behind it: just smack it
+          if (held && dME < SLASH_R - 6 && angd(meToBall, toG) < 1.6 && p.slashCd <= 0) { inp.aim = toG; inp.m = true; }   // within reach and not on the wrong side of it: just smack it (the kick always goes towards their goal)
           else {
             let tx = sx, ty = sy;
             const front = (p.x - bl.x) * Math.cos(toG) + (p.y - bl.y) * Math.sin(toG);
             if (front > -25 && dME < 230) {   // on the wrong side of the ball: go round it rather than shoving it the wrong way
               const px = -Math.sin(toG), py = Math.cos(toG), sg = ((p.x - bl.x) * px + (p.y - bl.y) * py) >= 0 ? 1 : -1;
-              const vx = bl.x + px * sg * 95 - Math.cos(toG) * 20, vy = bl.y + py * sg * 95 - Math.sin(toG) * 20;
-              if (A.freeAt(this.arena, vx, vy, 18, this.bounds)) { tx = vx; ty = vy; }
+              const vx = bl.x + px * sg * 95 - Math.cos(toG) * 60, vy = bl.y + py * sg * 95 - Math.sin(toG) * 60;   // well behind the ball, or the check above keeps sending us back to the same spot
+              if (A.freeAt(ar, vx, vy, 18, this.bounds) && !inBox(vx, vy, 16)) { tx = vx; ty = vy; }
+            } else if (!held && dME < 260 && front < -10 && !inBox(bl.x, bl.y, 10)) {   // nothing to throw yet: dribble it towards their goal instead of standing around
+              tx = bl.x + Math.cos(toG) * 40; ty = bl.y + Math.sin(toG) * 40;
             }
-            const r = this.walkTo(p, ai, 'bs', (x, y) => Math.hypot(x - tx, y - ty), 22, dt); if (r === 'nopath') toward(tx, ty);
+            if (stalled) {   // no progress for a while: go to the nearest free spot just behind-or-beside the ball and swat it from there
+              let bd = 1e9;
+              for (const rad of [46, 60]) for (let k = 0; k < 16; k++) { const a = k * Math.PI / 8, x = bl.x + Math.cos(a) * rad, y = bl.y + Math.sin(a) * rad; if (!A.freeAt(ar, x, y, 17, this.bounds) || inBox(x, y, 12) || angd(Math.atan2(bl.y - y, bl.x - x), toG) > 1.3) continue; const d = Math.hypot(x - p.x, y - p.y); if (d < bd) { bd = d; tx = x; ty = y; } }
+            }
+            const r = this.walkTo(p, ai, 'bs', (x, y) => Math.hypot(x - tx, y - ty), stalled ? 5 : 18, dt); if (r === 'nopath') toward(tx, ty); else if (r === 'arrived' && stalled) toward(bl.x, bl.y);   // (stuck and already in position: just walk into the ball)
           }
         }
+      } else if (open && rank === 0) {
+        // their goal is unguarded: the second attacker pushes up to the edge of the area to bury any rebound
+        const dx = foe - dirF * (nb ? 215 : 150), dy = 320 + (bl.y - 320) * 0.4;
+        const r = this.walkTo(p, ai, 'bu', (x, y) => Math.hypot(x - dx, y - dy), 30, dt); if (r === 'nopath') toward(dx, dy);
       } else {
-        const dx = home + (bl.x - home) * 0.3, dy = 320 + (bl.y - 320) * 0.55;
+        const dx = home + (bl.x - home) * (open ? 0.55 : 0.3), dy = 320 + (bl.y - 320) * 0.55;
         const r = this.walkTo(p, ai, 'bd', (x, y) => Math.hypot(x - dx, y - dy), 40, dt); if (r === 'nopath') toward(dx, dy);
       }
-      if (held && err < tol && dME > 50 && dME < 300 && clear && ai.cool <= 0 && !(p.gold)) {   // a clear shot that sends the ball towards their goal
-        inp.aim = meToBall + (Math.random() - 0.5) * 2 * [0.2, 0.1, 0.04][lvl]; inp.t = true; ai.cool = [1.4, 0.9, 0.6][lvl] + Math.random() * 0.5;
+      // a clear shot that sends the ball towards their goal (more eager when the net is open)
+      const maxR = open ? 420 : 300, shotTol2 = open ? tol * 1.7 : tol;
+      if (held && err < shotTol2 && dME > 50 && dME < maxR && clear && ai.cool <= 0 && !(p.gold)) {
+        inp.aim = meToBall + (Math.random() - 0.5) * 2 * [0.2, 0.1, 0.04][lvl]; inp.t = true; ai.cool = ([1.4, 0.9, 0.6][lvl] + Math.random() * 0.5) * (open ? 0.5 : 1);
       }
     }
-    // an enemy right in front of us: take a pot shot
-    if (held && !inp.t && ai.cool <= 0) {
+    // an enemy right in front of us: take a pot shot (never when a shot at the ball is the better use of the boomerang)
+    if (held && !inp.t && ai.cool <= 0 && !danger) {
       let en = null, ed = 190; for (const e of this.enemiesOf(p)) { const d = Math.hypot(e.x - p.x, e.y - p.y); if (d < ed && !this.blocked(p.x, p.y, e.x, e.y)) { ed = d; en = e; } }
       if (en) { inp.aim = Math.atan2(en.y - p.y, en.x - p.x) + (Math.random() - 0.5) * 2 * [0.4, 0.2, 0.1][lvl]; inp.t = true; ai.cool = [1.8, 1.2, 0.8][lvl] + Math.random() * 0.6; }
     }
@@ -1140,7 +1207,7 @@ class Round {
 
     if (ai.dodge <= 0) {
       for (const q of this.players) {
-        if (q === p) continue;
+        if (q === p || (this.teams && q.team === p.team)) continue;
         for (const b of q.boom) {
           if (b.s !== 'fly' && b.s !== 'ret') continue;
           const rx = p.x - b.x, ry = p.y - b.y, d = Math.hypot(rx, ry), sp = Math.hypot(b.vx, b.vy) || 1;
@@ -1221,7 +1288,12 @@ class Round {
     if (!this.over && this.golden && this.time > 210) {   // nobody got there: whoever held it longest wins
       this.over = true; let best = null; for (const p of this.players) if (p.goldT > 0 && (!best || p.goldT > best.goldT)) best = p; this.winner = best;
     }
-    if (!this.over && !this.golden && !this.ball && !this.hs && this.players.length >= 2) {
+    if (!this.over && this.tdm) {   // team deathmatch: no respawns, the round goes to the last team with anyone standing
+      const a0 = this.players.some(p => p.alive && p.team === 0), a1 = this.players.some(p => p.alive && p.team === 1);
+      if (!a0 || !a1) { this.over = true; this.tWin = a0 ? 0 : a1 ? 1 : -1; }
+      else if (this.time > 150) { this.over = true; this.tWin = -1; }
+    }
+    if (!this.over && !this.golden && !this.ball && !this.tdm && !this.hs && this.players.length >= 2) {
       const alive = this.players.filter(p => p.alive);
       if (alive.length <= 1) { this.over = true; this.winner = alive[0] || null; }
       else if (this.time > 150) { this.over = true; this.winner = null; }
@@ -1240,7 +1312,7 @@ class Round {
       if ((this.golden || this.ball) && !p.alive) e.rt = +Math.max(0, p.rt).toFixed(1);
       if (p.shk > 0) e.sv = +Math.min(1, p.shk / FALL_GRACE).toFixed(2);
       if (p.fall > 0) e.fa = +(1 - p.fall / FALL_T).toFixed(2);
-      if (this.ball) e.tm = p.team;
+      if (this.teams) e.tm = p.team;
       if (!p.alive && p.gx !== undefined) { e.gx = rnd(p.gx); e.gy = rnd(p.gy); }   // gravestone spot
       if (p.onIce) e.ic = 1;
       if (p.dashT > 0) { e.dtm = +p.dashT.toFixed(4); e.dd = [+p.ddx.toFixed(4), +p.ddy.toFixed(4)]; }
@@ -1255,6 +1327,7 @@ class Round {
     if (this.hs) out.hs = { sk: this.hs.seeker, ph: this.hs.ph, bt: HIDE_PREP - HIDE_LOOK, t: +(this.hs.ph === 'hide' ? this.hs.t : this.hs.left).toFixed(1), u: this.hs.unl ? -1 : (this.players.find(p => p.id === this.hs.seeker) || {}).uses, res: this.hs.res };
     if (this.sd) out.sd = 1;
     if (this.ball) { const b = this.bl; out.bl = [rnd(b.x), rnd(b.y), Math.round(b.vx), Math.round(b.vy)]; out.bs = this.bScore; out.bq = Math.ceil(this.bLeft); out.bg = this.set.ballGoals; if (this.bPause > 0) out.bp = 1; if (this.bOT) out.ov = 1; if (this.bWinner >= 0) out.bw = this.bWinner; }
+    if (this.ball && this.set.noBox) out.nb = 1;
     if (this.golden) { out.gm = GOLD_TIME; if (!this.gold.holder) out.gb = [Math.round(this.gold.x), Math.round(this.gold.y)]; }
     return out;
   }
@@ -1266,7 +1339,7 @@ class Match {
     this.scores = {}; for (const i of infos) this.scores[i.id] = 0;
     this.playerPUs = {}; for (const i of infos) this.playerPUs[i.id] = [];
     this.stats = {}; for (const i of infos) this.stats[i.id] = ACC.newStats();   // per-player stats for the accolades
-    this.accolades = null; this.champTeam = undefined;
+    this.accolades = null; this.champTeam = undefined; this.tScore = [0, 0]; this.tWinner = -1;
     this.seqs = {};   // last input sequence number received from each human (echoed in snapshots for client prediction)
     this.round = 0; this.hideRound = Math.floor(Math.random() * infos.length);   // hide & seek: the first seeker is picked at random, then it goes round in order
      this.sd = null; this.lastArena = -1; this.finished = false; this.winnerId = null; this.champId = null;   // sd: ids of the players in a sudden-death round (everyone else spectates)
@@ -1292,9 +1365,9 @@ class Match {
     this.accolades = this.buildAccolades();
   }
   buildAccolades() {
-    const mode = this.set.mode, ball = mode === 'ball', g = this.game, TN = ['Blue', 'Red'];
+    const mode = this.set.mode, ball = mode === 'ball' || mode === 'tdm', g = this.game, TN = ['Blue', 'Red'];
     const awards = ACC.build({ mode, infos: this.infos, st: this.stats, scores: this.scores, rounds: this.round, champId: this.champId });
-    const score = i => ball ? this.stats[i.id].goals : (this.scores[i.id] || 0);
+    const score = i => mode === 'ball' ? this.stats[i.id].goals : mode === 'tdm' ? this.stats[i.id].kills : (this.scores[i.id] || 0);
     const order = this.infos.slice().sort((a, b) => {
       if (ball) { const wa = a.team === this.champTeam ? 1 : 0, wb = b.team === this.champTeam ? 1 : 0; if (wa !== wb) return wb - wa; }
       else { const ca = a.id === this.champId ? 1 : 0, cb = b.id === this.champId ? 1 : 0; if (ca !== cb) return cb - ca; }
@@ -1307,9 +1380,10 @@ class Match {
       return { id: i.id, name: i.name, variant: i.variant, bot: !!i.bot, team: ball ? i.team : -1, score: score(i), rank, champ: ball ? i.team === this.champTeam : i.id === this.champId, awards: awards[i.id] };
     });
     let title, sub;
-    if (ball) { title = this.champTeam >= 0 ? `${TN[this.champTeam]} team wins!` : 'Full time!'; sub = `${TN[0]} ${g.bScore[0]} – ${g.bScore[1]} ${TN[1]}`; }
+    if (mode === 'tdm') { title = this.champTeam >= 0 ? `${TN[this.champTeam]} team wins!` : "It's a tie!"; sub = `${TN[0]} ${this.tScore[0]} – ${this.tScore[1]} ${TN[1]} \u00b7 ${this.round} round${this.round === 1 ? '' : 's'}`; }
+    else if (ball) { title = this.champTeam >= 0 ? `${TN[this.champTeam]} team wins!` : 'Full time!'; sub = `${TN[0]} ${g.bScore[0]} – ${g.bScore[1]} ${TN[1]}`; }
     else { const ch = this.infos.find(i => i.id === this.champId); title = ch ? `${ch.name} wins the match!` : "It's a tie!"; sub = `${this.round} round${this.round === 1 ? '' : 's'} played`; }
-    return { mode, title, sub, scoreLabel: { kill: 'kills', last: 'rounds won', golden: 'rounds won', hide: 'round wins', ball: 'goals' }[mode] || 'points', champTeam: ball ? this.champTeam : -1, players };
+    return { mode, title, sub, scoreLabel: { kill: 'kills', last: 'rounds won', golden: 'rounds won', hide: 'round wins', ball: 'goals', tdm: 'kills' }[mode] || 'points', champTeam: ball ? this.champTeam : -1, players };
   }
   input(id, inp) {
     const p = this.game && this.game.players.find(q => q.id === id); if (!p || p.bot) return;
@@ -1336,6 +1410,10 @@ class Match {
         this.winnerId = g.winner ? g.winner.id : null;
         if (!g.sd && (this.set.mode === 'last' || this.set.mode === 'golden') && g.winner) this.scores[g.winner.id]++;
         if (g.winner && this.set.mode !== 'ball' && this.stats[g.winner.id]) this.stats[g.winner.id].roundWins++;
+        if (this.set.mode === 'tdm') {   // the winning team's players each take the round win
+          this.tWinner = g.tWin;
+          if (g.tWin >= 0) { this.tScore[g.tWin]++; for (const p of g.players) if (p.team === g.tWin) { this.scores[p.id] = (this.scores[p.id] || 0) + 1; if (this.stats[p.id]) this.stats[p.id].roundWins++; } }
+        }
         g.finalize();
         const mxs = Math.max(...this.infos.map(i => this.scores[i.id] || 0));
         for (const i of this.infos) { const s = this.stats[i.id]; s.maxDef = Math.max(s.maxDef, mxs - (this.scores[i.id] || 0)); }   // how far behind this player ever was
@@ -1347,6 +1425,12 @@ class Match {
       g.step(dt); this.t -= dt;
       if (this.t <= 0) {
         if (this.set.mode === 'ball') { this.champTeam = g.bWinner; this.endMatch(null); return; }   // boomerang ball is one long round
+        if (this.set.mode === 'tdm') {   // first team to the round target takes the match
+          const t = this.tScore;
+          if (Math.max(t[0], t[1]) >= this.set.target && t[0] !== t[1]) { this.champTeam = t[0] > t[1] ? 0 : 1; this.endMatch(null); }
+          else this.startRound();
+          return;
+        }
         if (this.sd) {   // sudden death: last one standing is the champion; a draw means another sudden-death round
           if (this.winnerId) this.endMatch(this.winnerId);
           else this.startRound();
@@ -1370,12 +1454,12 @@ class Match {
   }
   snapshot() {
     const s = this.game.snap();
-    s.ph = this.phase; s.tm = Math.max(0, +this.t.toFixed(2)); s.rd = this.round; s.sc = this.scores; if (this.set.mode === 'hide') s.tg = this.set.hideWins; s.w = this.winnerId; s.ch = this.champId; if (this.set.mode === 'ball' && this.champTeam !== undefined) s.ct = this.champTeam;
+    s.ph = this.phase; s.tm = Math.max(0, +this.t.toFixed(2)); s.rd = this.round; s.sc = this.scores; if (this.set.mode === 'hide') s.tg = this.set.hideWins; s.w = this.winnerId; s.ch = this.champId; if ((this.set.mode === 'ball' || this.set.mode === 'tdm') && this.champTeam !== undefined) s.ct = this.champTeam; if (this.set.mode === 'tdm') { s.td = 1; s.ts = this.tScore; s.tg = this.set.target; s.tw = this.tWinner; }
     for (const e of s.pl) if (this.seqs[e.id]) e.sq = this.seqs[e.id];
     return s;
   }
 }
 
-const api = { GOLD_TIME, RESPAWN_TIME, Match, Round, VARIANTS, PU_INFO, PU_IDS, BOT_NAMES, B_SPEEDS, DT, BOUNCE_MAX, BOUNCE_SPEED, sanitizeSettings, fillBots, fillTeams, predictStep, BALL_R, TK_R, SEEKER_SPEED, FALL_GRACE, FALL_T };
+const api = { GOLD_TIME, RESPAWN_TIME, Match, Round, VARIANTS, PU_INFO, PU_IDS, BOT_NAMES, B_SPEEDS, DT, BOUNCE_MAX, BOUNCE_SPEED, sanitizeSettings, fillBots, fillTeams, predictStep, boxArena, penaltyBoxes, BALL_R, TK_R, SEEKER_SPEED, FALL_GRACE, FALL_T };
 if (typeof module === 'object' && module.exports) module.exports = api; else root.MGGame = api;
 })(typeof self !== 'undefined' ? self : globalThis);

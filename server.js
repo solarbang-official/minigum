@@ -67,7 +67,7 @@ function roomInfo(room) {
 function startMatch(room) {
   const humans = [...room.clients.values()].filter(c => !c.spec).map(c => ({ id: c.id, name: c.name, variant: c.variant }));
   let infos;
-  if (room.settings.mode === 'ball') {   // boomerang ball: two even teams, bots fill the gaps
+  if (room.settings.mode === 'ball' || room.settings.mode === 'tdm') {   // boomerang ball / team deathmatch: two even teams, bots fill the gaps
     for (const h of humans) { const cl = room.clients.get(h.id); h.team = cl.team === 0 || cl.team === 1 ? cl.team : -1; }
     infos = G.fillTeams(humans, room.settings.ballSize);
   } else {

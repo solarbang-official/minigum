@@ -167,3 +167,10 @@ Redesigned: headline in the winner's colour, a row of player cards (winners tint
 All menus (main menu, single-player setup, lobby, pause, settings) now share the results screen's look: purple glow background, translucent rounded panels, bold uppercase headings, white pill buttons (translucent for secondary), round gum pickers and flat chips. In-game HUD uses the same rounded, team-tinted rows.
 
 Menu backdrop: drifting bubbles and dust motes (paused when the menu is hidden; off with reduced-motion). Gum pickers tint with each gum's own colour, hop when chosen and do a walk wobble on hover.
+
+## Team Deathmatch, penalty boxes, melee, bots (1.20)
+- **Team Deathmatch** (Scoring: Team Deathmatch): up to 3v3, no respawns. A round ends when one team has nobody left standing; first team to the "Rounds to win" target takes the match. Teams are picked like Boomerang Ball (players or host), bots fill the gaps, no friendly fire.
+- **Kill pop-ups**: every kill shows on screen in the same gold style as power-up pick-ups ("Splash knocked out Gumbo!").
+- **No-go penalty boxes** (Boomerang Ball, default off): nobody can walk into the boxes round the goals; boomerangs and the ball still fly in. Bots plan around it and throw from the side to clear the ball.
+- **Melee** reaches further (76 px, was 52) with a wider arc (about 100 degrees each side, was 75), for hits, deflects and the ball.
+- **Ball bots**: the striker no longer stalls on the wrong side of the ball (open goals get scored), bots swat the ball up the pitch from the side when it is against the end line, and a stall breaker kicks in when a bot makes no progress.

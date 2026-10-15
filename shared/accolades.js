@@ -22,7 +22,7 @@ function newStats() {
   return s;
 }
 
-const ALL = ['last', 'kill', 'golden', 'hide', 'ball'], NH = ['last', 'kill', 'golden', 'ball'], R = ['last', 'kill', 'golden'], RH = ['last', 'kill', 'golden', 'hide'], LK = ['last', 'kill'];
+const ALL = ['last', 'kill', 'golden', 'hide', 'ball', 'tdm'], NH = ['last', 'kill', 'golden', 'ball', 'tdm'], R = ['last', 'kill', 'golden', 'tdm'], RH = ['last', 'kill', 'golden', 'hide'], LK = ['last', 'kill', 'tdm'];
 const pl = (n, w, ws) => `${n} ${n === 1 ? w : (ws || w + 's')}`;
 const secs = v => `${Math.round(v)}s`;
 const list = [];

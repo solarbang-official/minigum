@@ -156,17 +156,18 @@ function formHTML(botsLabel, botsMin) {
   return `<div class="pu-header">\u{1F5FA}\uFE0F Maps in rotation <span class="mapcount" data-mapcount></span></div>
   <div class="row maprow"><button type="button" class="sec small" data-mapsel="all">Select all</button><button type="button" class="sec small" data-mapsel="none">Deselect all</button></div>
   <div class="map-grid">${arenas.map((a, i) => `<label class="map-card" title="${a.name}${a.hs === 'only' ? ' (Hide &amp; Seek only)' : a.hs ? ' (also in Hide &amp; Seek)' : ''}"><input type="checkbox" data-map="${i}"><canvas width="132" height="88" data-thumb="${i}"></canvas><span>${i + 1}. ${a.name}${a.hs === 'only' ? ' \u{1F648}' : ''}</span></label>`).join('')}</div>
-  <label class="field-label">Scoring <select data-k="mode"><option value="last">👑 Last one standing</option><option value="kill">⚔️ Point per kill</option><option value="golden">\u{1F3C6} Golden Boomerang (hold it 14s)</option><option value="hide">\u{1F648} Hide &amp; Seek</option><option value="ball">\u26BD Boomerang Ball</option></select></label>
+  <label class="field-label">Scoring <select data-k="mode"><option value="last">👑 Last one standing</option><option value="kill">⚔️ Point per kill</option><option value="golden">\u{1F3C6} Golden Boomerang (hold it 14s)</option><option value="hide">\u{1F648} Hide &amp; Seek</option><option value="ball">\u26BD Boomerang Ball</option><option value="tdm">\u{1F91D} Team Deathmatch (no respawns)</option></select></label>
   <label class="field-label" data-nomode="hide ball"><span data-targetlabel>Rounds to win</span> <input data-k="target" type="number" min="1" max="25"></label>
   <label class="field-label" data-mode="hide" title="Round wins needed to win the match. A round win = the seeker finds everyone, or a hider stays hidden until time runs out. If several players reach it in the same round, they play a sudden-death Battle Royale and everyone else spectates.">Wins needed to win the match <input data-k="hideWins" type="number" min="1" max="25"></label>
   <label class="field-label" data-mode="hide" title="How long the hiders must stay hidden for the hiders to win the round.">Hiders win after (seconds) <input data-k="hideTime" type="number" min="10" max="600"></label>
   <label class="field-label" data-mode="hide" title="How many swings and throws the seeker gets. Finding a hider gives back 3. 0 = no limit.">Seeker melee + throw limit (0 = unlimited) <input data-k="hideUses" type="number" min="0" max="99"></label>
   <label class="field-label" data-mode="ball" title="Goals that win the match. 0 means no goal limit: whoever leads when the clock runs out wins.">Goals to win (0 = play to the clock) <input data-k="ballGoals" type="number" min="0" max="25"></label>
   <label class="field-label" data-mode="ball" title="If the score is level when time is up, the next goal wins.">Match length <select data-k="ballTime"><option value="60">1 minute</option><option value="120">2 minutes</option><option value="240">4 minutes</option><option value="360">6 minutes</option></select></label>
-  <label class="field-label" data-mode="ball" title="Bots fill empty spots so both teams are always the same size.">Players per team <select data-k="ballSize"><option value="0">Just enough (bots even it up)</option><option value="1">1 v 1</option><option value="2">2 v 2</option><option value="3">3 v 3</option></select></label>
-  <label class="field-label" data-mode="ball" data-sponly="1" title="Which side you play on against the bots.">Your team <select data-k="myTeam"><option value="0">\u{1F535} Blue</option><option value="1">\u{1F534} Red</option><option value="-1">\u{1F3B2} Random</option></select></label>
-  <label class="field-label" data-mode="ball" data-lobonly="1">Teams are picked by <select data-k="teamSel"><option value="players">The players</option><option value="host">The host</option></select></label>
+  <label class="field-label" data-mode="ball tdm" title="Bots fill empty spots so both teams are always the same size (up to 3 a side).">Players per team <select data-k="ballSize"><option value="0">Just enough (bots even it up)</option><option value="1">1 v 1</option><option value="2">2 v 2</option><option value="3">3 v 3</option></select></label>
+  <label class="field-label" data-mode="ball tdm" data-sponly="1" title="Which side you play on against the bots.">Your team <select data-k="myTeam"><option value="0">\u{1F535} Blue</option><option value="1">\u{1F534} Red</option><option value="-1">\u{1F3B2} Random</option></select></label>
+  <label class="field-label" data-mode="ball tdm" data-lobonly="1">Teams are picked by <select data-k="teamSel"><option value="players">The players</option><option value="host">The host</option></select></label>
   <label class="field-label" data-mode="ball" title="Off by default: no blue books, so no power-ups in Boomerang Ball. Turn on to let blue books spawn (the rate is set below).">Power-ups (blue books) <input data-k="ballPU" type="checkbox"></label>
+  <label class="field-label" data-mode="ball" title="Off by default. On: nobody can walk into the boxes around the goals. Boomerangs and the ball still fly in, so keep the ball out with throws.">No-go penalty boxes (can't walk into them) <input data-k="noBox" type="checkbox"></label>
   <label class="field-label" data-nomode="hide">Blue book spawn <select data-k="books"><option value="off">Off</option><option value="slow">Slow</option><option value="normal">Normal</option><option value="fast">Fast</option></select></label>
   <label class="field-label">Boomerang Speed <select data-k="boomSpeed"><option value="slow">Slow</option><option value="normal">Normal</option><option value="fast">Fast</option><option value="insane">Insane</option></select></label>
   <label class="field-label">Boomerangs bounce off walls <input data-k="bounce" type="checkbox"></label>
@@ -176,7 +177,7 @@ function formHTML(botsLabel, botsMin) {
   <label class="field-label" data-nomode="hide ball" title="Keep your power-ups when the next round starts.">Power-ups carry over between rounds <input data-k="puCarry" type="checkbox"></label>
   <label class="field-label" data-nomode="hide ball">Losers start with shield <input data-k="underdog" type="checkbox"></label>
   <label class="field-label">AI skill <select data-k="ai"><option value="0">Easy</option><option value="1">Normal</option><option value="2">Hard</option></select></label>
-  <label class="field-label" data-nomode="ball">${botsLabel} <input data-k="bots" type="number" min="${botsMin}" max="5"></label>
+  <label class="field-label" data-nomode="ball tdm">${botsLabel} <input data-k="bots" type="number" min="${botsMin}" max="5"></label>
   <details class="fold" data-fold="pu"><summary class="pu-header">⚡ Enabled Powerups <span class="mapcount" data-pucount></span></summary>
   <div class="pu-grid">
     ${puIds.map(id => `<label class="pu-chip"><input type="checkbox" data-pu="${id}"> <span>${puInfo[id] ? puInfo[id].n : id}</span></label>`).join('')}
@@ -277,13 +278,14 @@ if ($('#spStart')) $('#spStart').onclick = () => {
   spSettings = readForm($('#spForm')); if (spSettings.bots < 1) spSettings.bots = 1;
   localStorage.mgSP = JSON.stringify(spSettings);
   const humans = [{ id: 'me', name: (myName || 'You').slice(0, 14), variant: myVar, team: spSettings.myTeam === 1 ? 1 : spSettings.myTeam === 0 || spSettings.myTeam === undefined ? 0 : Math.floor(Math.random() * 2) }];
-  const inf = spSettings.mode === 'ball' ? G.fillTeams(humans, spSettings.ballSize || 2) : G.fillBots(humans, spSettings.bots);
+  const inf = spSettings.mode === 'ball' || spSettings.mode === 'tdm' ? G.fillTeams(humans, spSettings.ballSize || 2) : G.fillBots(humans, spSettings.bots);
   startGame('sp', inf, spSettings, new G.Match(spSettings, inf));
 };
 
 function startGame(m, inf, set, mt) {
   curSet = set || {}; mode = m; infos = inf; names = {}; varOf = {}; teamOf = {}; announcements = []; goalInfo = null;
   for (const i of inf) { names[i.id] = i.name; varOf[i.id] = i.variant; if (i.team === 0 || i.team === 1) teamOf[i.id] = i.team; }
+  for (const k in layers) delete layers[k]; layerOrder.length = 0;   // the pitch art depends on the penalty-box setting
   closeSettings(); setPause(false); releaseInput();
   match = mt; lastSnap = null; myId = m === 'sp' ? 'me' : myId; show(null); if ($('#leave')) $('#leave').classList.remove('hidden'); hintT = performance.now();
   netReset(); if (m === 'mp') wsSend({ t: 'ping', c: performance.now() });
@@ -399,7 +401,7 @@ function renderLobby() {
   if ($('#lobCode')) $('#lobCode').textContent = room.code;
   const tag = p => `${esc(p.name)}${p.id === myId ? ' (you)' : ''}${p.id === room.hostId ? ' ★' : ''}`;
   const plrs = room.players.filter(p => !p.spec), specs = room.players.filter(p => p.spec);
-  const ballMode = !!(room.settings && room.settings.mode === 'ball'), hostNow = room.hostId === myId;
+  const ballMode = !!(room.settings && (room.settings.mode === 'ball' || room.settings.mode === 'tdm')), isTdm = !!(room.settings && room.settings.mode === 'tdm'), hostNow = room.hostId === myId;
   const specRows = specs.map(p => `<div style="opacity:.7"><span style="font-size:22px">\u{1F441}\uFE0F</span><span>${tag(p)} <em style="color:var(--muted);font-size:14px">spectating</em></span></div>`).join('');
   if ($('#plist')) {
     if (!ballMode) $('#plist').innerHTML = plrs.map(p => `<div><img src="${fishSrc(p.variant)}"><span>${tag(p)}</span></div>`).join('') + specRows;
@@ -426,7 +428,7 @@ function renderLobby() {
     else for (const i of lobForm.querySelectorAll('[data-k]')) i.disabled = false;
   }
   if ($('#lobStart')) $('#lobStart').disabled = !host;
-  if ($('#lobHint')) $('#lobHint').textContent = ballMode ? (host ? 'Boomerang Ball: bots fill empty spots so both teams are even. ' + (room.settings.teamSel === 'host' ? 'You pick the teams.' : 'Players pick their own team.') : (room.settings.teamSel === 'host' ? 'The host picks the teams.' : 'Pick your team above.') + ' Waiting for the host\u2026') : host ? 'You are the host. Empty slots are filled with AI bots.' : 'Waiting for the host to start…';
+  if ($('#lobHint')) $('#lobHint').textContent = ballMode ? (host ? (isTdm ? 'Team Deathmatch: ' : 'Boomerang Ball: ') + 'bots fill empty spots so both teams are even. ' + (room.settings.teamSel === 'host' ? 'You pick the teams.' : 'Players pick their own team.') : (room.settings.teamSel === 'host' ? 'The host picks the teams.' : 'Pick your team above.') + ' Waiting for the host\u2026') : host ? 'You are the host. Empty slots are filled with AI bots.' : 'Waiting for the host to start…';
 }
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
@@ -525,13 +527,14 @@ function stateFromSnap(snap, me) {
   return { x: me.x, y: me.y, dashT: me.dtm || 0, ddx: me.dd ? me.dd[0] : 0, ddy: me.dd ? me.dd[1] : 0, dashCd: me.cd || 0,
     frozen: !!me.fr, tk: false, bam: !!me.bm, ice: !!me.ic, sm: (snap.hs && snap.hs.sk === myId) ? G.SEEKER_SPEED : 1, caff: me.pu.includes('caffeinated'), dwall: me.pu.includes('dashwall'), tpOut };
 }
+function predArena(i) { const a = A.list[i]; return a && curSet && curSet.mode === 'ball' && curSet.noBox ? G.boxArena(a) : a; }
 function reconcile(snap) {
   const me = mySnap(snap); if (!me || mode !== 'mp') return;
   if (snap.rd !== NET.rd) { NET.rd = snap.rd; NET.err.x = NET.err.y = 0; NET.pred = null; }
   const ack = me.sq || 0;
   while (NET.pending.length && NET.pending[0].sq <= ack) NET.pending.shift();
   if (!predictable(snap, me)) { NET.pred = null; return; }
-  const arena = A.list[snap.ar]; if (!arena) return;
+  const arena = predArena(snap.ar); if (!arena) return;
   const st = stateFromSnap(snap, me);
   for (const c of NET.pending) G.predictStep(arena, st, c, G.DT);
   if (NET.pred) {
@@ -550,7 +553,7 @@ function mpTick() {
   latch.t = latch.m = latch.d = latch.r = false;
   NET.last.mx = c.mx; NET.last.my = c.my; NET.last.dh = c.dh;
   NET.pending.push(c); if (NET.pending.length > 180) NET.pending.shift();
-  if (NET.pred && lastSnap) G.predictStep(A.list[lastSnap.ar], NET.pred, { sq: c.sq, mx: c.mx, my: c.my, aim: c.aim, d: c.d }, G.DT);
+  if (NET.pred && lastSnap) G.predictStep(predArena(lastSnap.ar), NET.pred, { sq: c.sq, mx: c.mx, my: c.my, aim: c.aim, d: c.d }, G.DT);
 }
 // Throw / slash / recall don't wait for the next 1/60 s tick: send right away, and show the result locally at once.
 function netAct(kind) {
@@ -685,6 +688,12 @@ function addAnnouncement(pName, puId, type) {
   announcements.push({ txt, t0: performance.now(), life: 2500 });
 }
 
+function addKillAnn(e) {
+  const by = e[2] || '', vic = e[4] || 'Player', cause = e[5];
+  const verb = { melee: 'slashed', expl: 'blew up', fire: 'burned', ice: 'froze', hit: 'hit' }[cause] || 'got';
+  let txt = by ? (cause === 'melee' || cause === 'expl' || cause === 'fire' ? `${by} ${verb} ${vic}!` : `${by} knocked out ${vic}!`) : (cause === 'oob' || cause === 'drop' ? `${vic} fell out!` : `${vic} was knocked out!`);
+  announcements.push({ txt, t0: performance.now(), life: 2500 });
+}
 function playEvents(evs) {
   if (!evs) return; const now = performance.now();
   for (const e of evs) {
@@ -695,6 +704,7 @@ function playEvents(evs) {
       case 'fall': beep(520, 0.7, 'sine', 0.05, -440); break;
       case 'die': fx.push({ k, x, y, t0: now, life: 700, w: e[3] }); beep(300, 0.35, 'sawtooth', 0.07, -220); break;
       case 'pk': fx.push({ k, x, y, t0: now, life: 500 }); beep(700, 0.12, 'sine', 0.06, 500); break;
+      case 'kill_ann': addKillAnn(e); break;
       case 'pu_ann': addAnnouncement(e[2] || names[e[1]] || 'Player', e[3], e[4]); beep(850, 0.25, 'sine', 0.08, 300); break;
       case 'found': beep(660, 0.18, 'square', 0.08, 990); break;
       case 'hs_go': beep(440, 0.3, 'triangle', 0.1, 880); break;
@@ -838,6 +848,7 @@ function drawPitch(g, a) {
   g.beginPath(); g.moveTo(480, 6); g.lineTo(480, 634); g.stroke(); g.beginPath(); g.arc(480, 320, 74, 0, 7); g.stroke();
   g.beginPath(); g.arc(480, 320, 6, 0, 7); g.fillStyle = 'rgba(255,255,255,0.7)'; g.fill();
   g.strokeRect(2, gl.y1 - 60, 150, gl.y2 - gl.y1 + 120); g.strokeRect(958 - 150, gl.y1 - 60, 150, gl.y2 - gl.y1 + 120); g.strokeRect(2, 2, 956, 636);
+  if (curSet && curSet.noBox && !thumbDraw) { g.fillStyle = 'rgba(255,70,70,0.16)'; g.fillRect(2, gl.y1 - 60, 150, gl.y2 - gl.y1 + 120); g.fillRect(958 - 150, gl.y1 - 60, 150, gl.y2 - gl.y1 + 120); g.save(); g.setLineDash([10, 8]); g.strokeStyle = 'rgba(255,120,120,0.8)'; g.lineWidth = 3; g.strokeRect(2, gl.y1 - 60, 150, gl.y2 - gl.y1 + 120); g.strokeRect(958 - 150, gl.y1 - 60, 150, gl.y2 - gl.y1 + 120); g.restore(); }
   for (const t of [0, 1]) {
     const x0 = t === 0 ? 0 : 960 - gl.depth, c = TEAM[t].c;
     g.fillStyle = c; g.globalAlpha = 0.35; g.fillRect(x0, gl.y1, gl.depth, gl.y2 - gl.y1); g.globalAlpha = 0.8; g.strokeStyle = '#fff'; g.lineWidth = 1.5;
@@ -928,7 +939,8 @@ function layerFor(idx) {
   while (layerOrder.length > 3) delete layers[layerOrder.shift()];   // keep memory small: only the latest few maps stay cached
   return c;
 }
-function paintThumb(cnv, idx) { const a = A.list[idx]; if (a && cnv && cnv.getContext) { const g = cnv.getContext('2d'); g.clearRect(0, 0, cnv.width, cnv.height); renderArena(g, a, idx, cnv.width / 960); } }
+let thumbDraw = false;
+function paintThumb(cnv, idx) { const a = A.list[idx]; if (a && cnv && cnv.getContext) { const g = cnv.getContext('2d'); g.clearRect(0, 0, cnv.width, cnv.height); thumbDraw = true; try { renderArena(g, a, idx, cnv.width / 960); } finally { thumbDraw = false; } } }
 
 const GOLD_COL = '#ffd53a';
 const boomCol = pl => pl && pl.gh ? GOLD_COL : (pl && V[pl.v] ? V[pl.v].body : '#d9a54a');
@@ -1071,7 +1083,7 @@ function draw(snap, age, now) {
     if (p.tk) { ctx.strokeStyle = '#d68bff'; ctx.lineWidth = 2; ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.arc(x, y, G.TK_R, 0, 7); ctx.stroke(); ctx.setLineDash([]); }
     if (lmbHeld && !recallHold && !lmbSlash && cfg.aimGuide && p.id === myId) { ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 3; ctx.setLineDash([2, 10]); ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(x + Math.cos(aimAngle) * 26, y + Math.sin(aimAngle) * 26); ctx.lineTo(x + Math.cos(aimAngle) * 190, y + Math.sin(aimAngle) * 190); ctx.stroke(); ctx.setLineDash([]); ctx.lineCap = 'butt'; }
     const slv = shownSlash(p, now);
-    if (slv > 0) { ctx.strokeStyle = `rgba(255,255,255,${slv})`; ctx.lineWidth = 6; ctx.beginPath(); ctx.arc(x, y, 38, aimAngle - 1.3 + (1 - slv) * 0.8, aimAngle + 1.3 - slv * 0.2 * 0); ctx.stroke(); }
+    if (slv > 0) { ctx.strokeStyle = `rgba(255,255,255,${slv})`; ctx.lineWidth = 7; ctx.beginPath(); ctx.arc(x, y, 58, aimAngle - 1.75 + (1 - slv) * 1.0, aimAngle + 1.75); ctx.stroke(); }
     if (p.bm) { ctx.fillStyle = '#ff6b6b'; ctx.font = 'bold 14px Fredoka, sans-serif'; ctx.textAlign = 'center'; ctx.fillText('?!', x, y - 32); }
     if (!p.dc && cfg.names) {
       ctx.font = 'bold 12px Fredoka, sans-serif'; ctx.textAlign = 'center'; ctx.lineWidth = 3; ctx.strokeStyle = '#120b1c'; ctx.fillStyle = p.id === myId ? '#ffc83b' : (p.tm !== undefined && TEAM[p.tm] ? (p.tm === 0 ? '#a9ccff' : '#ffb3b3') : '#fff');
@@ -1167,6 +1179,15 @@ function drawHUD(snap, me, now) {
     if (!iAmSeeker && hs.ph === 'seek' && snap.ph === 'playing' && me && me.al) line(me.ds >= 0 ? 'You look like a prop. Keep still!' : 'Stand still to turn back into a prop', 96, '#bfe6ff', 'bold 15px Fredoka, sans-serif');
     ctx.restore();
   }
+  if (snap.td) {   // team deathmatch: round wins and who is still standing, per team
+    const alive = [0, 1].map(t => snap.pl.filter(p => !p.dc && p.tm === t && p.al).length), tot = [0, 1].map(t => snap.pl.filter(p => !p.dc && p.tm === t).length), ts = snap.ts || [0, 0];
+    ctx.save(); ctx.textAlign = 'center';
+    [0, 1].forEach(t => { const x = t === 0 ? 372 : 520; ctx.fillStyle = TEAM[t].c; ctx.globalAlpha = 0.92; rrect(ctx, x, 8, 68, 40, 10); ctx.fill(); ctx.globalAlpha = 1; ctx.fillStyle = '#fff'; ctx.font = 'bold 26px Fredoka, sans-serif'; ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(0,0,0,0.5)'; ctx.strokeText(String(ts[t]), x + 34, 38); ctx.fillText(String(ts[t]), x + 34, 38); });
+    ctx.fillStyle = 'rgba(20,12,30,0.88)'; rrect(ctx, 438, 8, 84, 40, 8); ctx.fill();
+    ctx.font = 'bold 18px Fredoka, sans-serif'; ctx.fillStyle = '#fff'; ctx.fillText(`${alive[0]} v ${alive[1]}`, 480, 34);
+    ctx.font = 'bold 12px Fredoka, sans-serif'; ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.fillText(`Round ${snap.rd} \u00b7 first to ${snap.tg} round${snap.tg === 1 ? '' : 's'} \u00b7 no respawns`, 480, 62);
+    ctx.restore();
+  }
   if (snap.bl) {   // boomerang ball: scoreboard, clock and goal banner
     const sc2 = snap.bs || [0, 0], left = Math.max(0, snap.bq || 0), mm = Math.floor(left / 60), ss = String(left % 60).padStart(2, '0');
     ctx.save(); ctx.textAlign = 'center'; ctx.lineJoin = 'round';
@@ -1198,9 +1219,9 @@ function drawHUD(snap, me, now) {
 
   ctx.textAlign = 'center';
   const big = (txt, y, col) => { ctx.font = 'bold 64px Fredoka, sans-serif'; ctx.lineWidth = 8; ctx.strokeStyle = '#120b1c'; ctx.fillStyle = col || '#ffc83b'; ctx.strokeText(txt, 480, y); ctx.fillText(txt, 480, y); };
-  if (snap.ph === 'countdown') { big(String(Math.ceil(snap.tm)), 330); ctx.font = 'bold 20px Fredoka, sans-serif'; ctx.fillStyle = '#fff'; ctx.fillText(snap.bl ? 'Boomerang Ball' : `Round ${snap.rd}`, 480, 270); if (snap.bl && teamOf[myId] !== undefined) { ctx.fillStyle = TEAM[teamOf[myId]].c; ctx.fillText(`You are on the ${TEAM[teamOf[myId]].n} team \u2014 push the ball into the ${TEAM[1 - teamOf[myId]].n} goal ${teamOf[myId] === 0 ? '\u2192' : '\u2190'}`, 480, 390); } if (snap.hs) { ctx.fillStyle = '#ffc83b'; ctx.fillText(`${names[snap.hs.sk] || '?'} is the seeker \u2014 everyone else, get ready to hide!`, 480, 390); } if (snap.gm) { ctx.fillStyle = '#ffe36b'; ctx.fillText(`Grab the Golden Boomerang and hold it for ${snap.gm} seconds to win the round!`, 480, 390); } }
-  else if (snap.ph === 'over') { if (snap.bl) { if (snap.bw !== undefined && TEAM[snap.bw]) big(`${TEAM[snap.bw].n} team wins!`, 330, TEAM[snap.bw].c); } else if (!snap.hs) big(snap.w ? `${names[snap.w] || '?'} wins the round!` : 'Draw!', 330); }
-  else if (snap.ph === 'end') { big(snap.bl ? (TEAM[snap.ct] ? `${TEAM[snap.ct].n} team wins the match!` : 'Full time!') : snap.ch ? `${names[snap.ch] || '?'} wins the match!` : "It's a tie!", 320, '#7fe08a'); ctx.font = 'bold 20px Fredoka, sans-serif'; ctx.fillStyle = '#fff'; ctx.fillText('Accolades coming up…', 480, 370); }
+  if (snap.ph === 'countdown') { big(String(Math.ceil(snap.tm)), 330); ctx.font = 'bold 20px Fredoka, sans-serif'; ctx.fillStyle = '#fff'; ctx.fillText(snap.bl ? 'Boomerang Ball' : snap.td ? `Team Deathmatch \u2014 Round ${snap.rd}` : `Round ${snap.rd}`, 480, 270); if (snap.td && teamOf[myId] !== undefined) { ctx.fillStyle = TEAM[teamOf[myId]].c; ctx.fillText(`You are on the ${TEAM[teamOf[myId]].n} team \u2014 no respawns, last team standing wins`, 480, 390); } if (snap.bl && teamOf[myId] !== undefined) { ctx.fillStyle = TEAM[teamOf[myId]].c; ctx.fillText(`You are on the ${TEAM[teamOf[myId]].n} team \u2014 push the ball into the ${TEAM[1 - teamOf[myId]].n} goal ${teamOf[myId] === 0 ? '\u2192' : '\u2190'}`, 480, 390); } if (snap.hs) { ctx.fillStyle = '#ffc83b'; ctx.fillText(`${names[snap.hs.sk] || '?'} is the seeker \u2014 everyone else, get ready to hide!`, 480, 390); } if (snap.gm) { ctx.fillStyle = '#ffe36b'; ctx.fillText(`Grab the Golden Boomerang and hold it for ${snap.gm} seconds to win the round!`, 480, 390); } }
+  else if (snap.ph === 'over') { if (snap.td) { if (TEAM[snap.tw]) big(`${TEAM[snap.tw].n} team wins the round!`, 330, TEAM[snap.tw].c); else big('Draw!', 330); } else if (snap.bl) { if (snap.bw !== undefined && TEAM[snap.bw]) big(`${TEAM[snap.bw].n} team wins!`, 330, TEAM[snap.bw].c); } else if (!snap.hs) big(snap.w ? `${names[snap.w] || '?'} wins the round!` : 'Draw!', 330); }
+  else if (snap.ph === 'end') { big(snap.td ? (TEAM[snap.ct] ? `${TEAM[snap.ct].n} team wins the match!` : "It's a tie!") : snap.bl ? (TEAM[snap.ct] ? `${TEAM[snap.ct].n} team wins the match!` : 'Full time!') : snap.ch ? `${names[snap.ch] || '?'} wins the match!` : "It's a tie!", 320, '#7fe08a'); ctx.font = 'bold 20px Fredoka, sans-serif'; ctx.fillStyle = '#fff'; ctx.fillText('Accolades coming up…', 480, 370); }
   if (cfg.hints && performance.now() - hintT < 12000 && snap.ph !== 'end' && !isBlind(snap)) { ctx.font = '13px Fredoka, sans-serif'; ctx.fillStyle = 'rgba(255,255,255,0.75)'; ctx.fillText('WASD move · aim mouse · hold + release click to throw' + (curSet.pullBack ? ' · hold click to pull back' : ' · walk over boomerangs to pick them up') + ' · right-click slash · Space dash', 480, 586); }
 }
 
@@ -1235,7 +1256,7 @@ function frame(nowT) {
 
 setInterval(() => { if (mode === 'mp') wsSend({ t: 'ping', c: performance.now() }); }, 1000);
 
-if (/[?&]debug\b/.test(location.search)) window.__mg = { showAcc: (a, k) => showAccolades(a, k || 'sp'), layer: i => layerFor(i).toDataURL('image/png'), disp: () => { const m = mySnap(lastSnap); return m ? myDisp(m) : null; }, snap: () => lastSnap, music: () => ({ ctx: musicCtx, now: musicNow, paused: musicEl ? musicEl.paused : null, t: musicEl ? musicEl.currentTime : 0, vol: musicEl ? musicEl.volume : 0 }), pause: () => pauseOpen, cfg: () => cfg, binds: () => binds, net: NET, match: () => match, mouse: () => [mouseX, mouseY, haveMouse, lastAim, sc, offX, offY] };
+if (/[?&]debug\b/.test(location.search)) window.__mg = { ann: () => announcements, showAcc: (a, k) => showAccolades(a, k || 'sp'), layer: i => layerFor(i).toDataURL('image/png'), disp: () => { const m = mySnap(lastSnap); return m ? myDisp(m) : null; }, snap: () => lastSnap, music: () => ({ ctx: musicCtx, now: musicNow, paused: musicEl ? musicEl.paused : null, t: musicEl ? musicEl.currentTime : 0, vol: musicEl ? musicEl.volume : 0 }), pause: () => pauseOpen, cfg: () => cfg, binds: () => binds, net: NET, match: () => match, mouse: () => [mouseX, mouseY, haveMouse, lastAim, sc, offX, offY] };
 if (window.__mg) window.__mg.net = NET;
 requestAnimationFrame(frame);
 show('menu');
