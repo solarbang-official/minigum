@@ -67,7 +67,7 @@ function sanitizeSettings(s) {
   o.boomSpeed = ['slow', 'normal', 'fast', 'insane'].includes(s.boomSpeed) ? s.boomSpeed : 'normal';
   o.underdog = !!s.underdog;
   o.bounce = s.bounce === undefined ? true : !!s.bounce;   // boomerangs bounce off walls by default
-  o.pullBack = !!s.pullBack;     // hold the throw button to pull dropped boomerangs back (otherwise walk over them)
+  o.pullBack = s.pullBack === undefined ? true : !!s.pullBack;     // hold the throw button to pull dropped boomerangs back (otherwise walk over them)
   o.homing = !!s.homing;         // thrown boomerangs arc slightly towards enemies
   o.goldThrow = !!s.goldThrow;   // golden boomerang mode: may the holder throw it? (off = melee only)
   const ht = parseInt(s.hideTime); o.hideTime = Number.isNaN(ht) ? 120 : clamp(ht, 10, 600);   // hide & seek: seconds the hiders must survive
@@ -76,6 +76,7 @@ function sanitizeSettings(s) {
   const bg = parseInt(s.ballGoals); o.ballGoals = Number.isNaN(bg) ? 3 : clamp(bg, 0, 25);   // boomerang ball: goals that win the match (0 = no goal limit, play to the clock)
   const bt = parseInt(s.ballTime); o.ballTime = BALL_TIMES.includes(bt) ? bt : 360;            // boomerang ball: match length in seconds
   o.ballPU = !!s.ballPU;   // boomerang ball: blue books (power-ups) are off unless the host turns them on
+  const mt = parseInt(s.myTeam); o.myTeam = mt === 1 ? 1 : mt === -1 ? -1 : 0;   // single-player boomerang ball: which team you are on (-1 = random)
   o.teamSel = s.teamSel === 'host' ? 'host' : 'players';                                         // boomerang ball: who picks the teams
   const bz = parseInt(s.ballSize); o.ballSize = Number.isNaN(bz) ? 0 : clamp(bz, 0, 3);          // boomerang ball: players per team (0 = just enough, bots fill empty spots)
   o.puCarry = !!s.puCarry;       // power-ups carry over into the next round
@@ -322,7 +323,7 @@ class Round {
     if (!spot) spot = this.freeSpot(this.bounds.x + this.bounds.w / 2, this.bounds.y + this.bounds.h / 2);
     Object.assign(p, { alive: true, x: spot[0], y: spot[1], vx: 0, vy: 0, invuln: 1.5, burn: 0, burner: null, frozen: false, fz: 0, iceT: 0, iceImm: 0, onIce: false,
       dashT: 0, dashCd: 0, slash: 0, slashCd: 0, bam: 0, still: 0, disg: -1, oob: 0, shk: 0, fall: 0, fcause: null, tk: false, cause: null, gold: false, rt: 0, pu: [], boom: [] });
-    p.boom.push(newB(p)); delete p.gx; delete p.gy;
+    p.boom.push(newB(p)); delete p.gx; delete p.gy; p.input.t = p.input.m = p.input.d = p.input.r = false;
     this.ev('resp', p.x, p.y);
   }
   // hide & seek: 10 s to hide, then the seeker hunts until the hiders' timer runs out
@@ -1192,7 +1193,7 @@ class Round {
     // after 0.25s without input the player stands still.
     for (const p of this.players) if (p.alive && !p.bot && ++p.idle > 15) { p.input.mx = 0; p.input.my = 0; p.input.dh = false; }
     if (this.golden || this.ball) for (const p of this.players) if (!p.alive && p.rt > 0 && !this.over) { p.rt -= dt; if (p.rt <= 0) this.respawn(p); }
-    for (const p of this.players) if (p.alive) this.stepPlayer(p, dt);
+    for (const p of this.players) { if (p.alive) this.stepPlayer(p, dt); else p.input.t = p.input.m = p.input.d = p.input.r = false; }   // anything pressed while dead is thrown away, not saved up for the respawn
     const al = this.hs ? [] : this.players.filter(p => p.alive);   // hide & seek: gums pass through each other, nobody can be shoved around
     for (let i = 0; i < al.length; i++) for (let j = i + 1; j < al.length; j++) {
       const a = al[i], b = al[j], dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy);
@@ -1315,7 +1316,7 @@ class Match {
     const i = p.input;
     i.mx = clamp(+inp.mx || 0, -1, 1); i.my = clamp(+inp.my || 0, -1, 1);
     i.aim = Number.isFinite(+inp.aim) ? +inp.aim : i.aim; i.dh = !!inp.dh; i.rh = !!inp.rh; i.ad = clamp(+inp.ad || 0, 0, 2000);
-    if (inp.t) i.t = true; if (inp.m) i.m = true; if (inp.d) i.d = true; if (inp.r) i.r = true;
+    if (p.alive) { if (inp.t) i.t = true; if (inp.m) i.m = true; if (inp.d) i.d = true; if (inp.r) i.r = true; }
     p.idle = 0;
     const sq = inp.sq | 0; if (sq > (this.seqs[id] | 0)) this.seqs[id] = sq;
   }

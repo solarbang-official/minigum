@@ -12,7 +12,8 @@ const fishImgs = V.map((v, i) => { const im = new Image(); im.src = fishSrc(i); 
 let curSet = {};   // settings of the match being played
 let wantSpec = localStorage.mgSpec === '1';
 let myName = localStorage.mgName || '', myVar = +localStorage.mgVar || 0;
-let spSettings = Object.assign({ arenas: A.list.map((_, i) => i), mode: 'last', target: 5, books: 'normal', boomSpeed: 'normal', bounce: true, pullBack: false, homing: false, goldThrow: false, puCarry: false, hideTime: 120, hideUses: 12, hideWins: 7, ballSize: 2, ballGoals: 3, ballTime: 360, underdog: false, ai: 1, bots: 3, pus: G.PU_IDS ? G.PU_IDS.slice() : [] }, safeParse(localStorage.mgSP));
+let spSettings = Object.assign({ arenas: A.list.map((_, i) => i), mode: 'last', target: 5, books: 'normal', boomSpeed: 'normal', bounce: true, pullBack: true, homing: false, goldThrow: false, puCarry: false, hideTime: 120, hideUses: 12, hideWins: 7, ballSize: 2, myTeam: 0, ballGoals: 3, ballTime: 360, underdog: false, ai: 1, bots: 3, pus: G.PU_IDS ? G.PU_IDS.slice() : [] }, safeParse(localStorage.mgSP));
+try { if (!localStorage.mgPB1) { spSettings.pullBack = true; localStorage.mgPB1 = '1'; } } catch (e) {}   // Pull Back is on by default now
 try { if (!localStorage.mgMapsV8 && Array.isArray(spSettings.arenas)) { for (let i = 0; i < A.list.length; i++) if (A.list[i].hs === 'only' && !spSettings.arenas.includes(i)) spSettings.arenas.push(i); localStorage.mgMapsV8 = '1'; } } catch (e) {}   // new hide & seek maps start ticked
 try { if (!localStorage.mgMapsV9 && Array.isArray(spSettings.arenas)) { for (let i = 0; i < A.list.length; i++) if (A.list[i].hs === 'only' && !spSettings.arenas.includes(i)) spSettings.arenas.push(i); localStorage.mgMapsV9 = '1'; } } catch (e) {}
 function safeParse(s) { try { return JSON.parse(s) || {}; } catch (e) { return {}; } }
@@ -127,6 +128,7 @@ function formHTML(botsLabel, botsMin) {
   <label class="field-label" data-mode="ball" title="Goals that win the match. 0 means no goal limit: whoever leads when the clock runs out wins.">Goals to win (0 = play to the clock) <input data-k="ballGoals" type="number" min="0" max="25"></label>
   <label class="field-label" data-mode="ball" title="If the score is level when time is up, the next goal wins.">Match length <select data-k="ballTime"><option value="60">1 minute</option><option value="120">2 minutes</option><option value="240">4 minutes</option><option value="360">6 minutes</option></select></label>
   <label class="field-label" data-mode="ball" title="Bots fill empty spots so both teams are always the same size.">Players per team <select data-k="ballSize"><option value="0">Just enough (bots even it up)</option><option value="1">1 v 1</option><option value="2">2 v 2</option><option value="3">3 v 3</option></select></label>
+  <label class="field-label" data-mode="ball" data-sponly="1" title="Which side you play on against the bots.">Your team <select data-k="myTeam"><option value="0">\u{1F535} Blue</option><option value="1">\u{1F534} Red</option><option value="-1">\u{1F3B2} Random</option></select></label>
   <label class="field-label" data-mode="ball" data-lobonly="1">Teams are picked by <select data-k="teamSel"><option value="players">The players</option><option value="host">The host</option></select></label>
   <label class="field-label" data-mode="ball" title="Off by default: no blue books, so no power-ups in Boomerang Ball. Turn on to let blue books spawn (the rate is set below).">Power-ups (blue books) <input data-k="ballPU" type="checkbox"></label>
   <label class="field-label" data-nomode="hide">Blue book spawn <select data-k="books"><option value="off">Off</option><option value="slow">Slow</option><option value="normal">Normal</option><option value="fast">Fast</option></select></label>
@@ -139,13 +141,16 @@ function formHTML(botsLabel, botsMin) {
   <label class="field-label" data-nomode="hide ball">Losers start with shield <input data-k="underdog" type="checkbox"></label>
   <label class="field-label">AI skill <select data-k="ai"><option value="0">Easy</option><option value="1">Normal</option><option value="2">Hard</option></select></label>
   <label class="field-label" data-nomode="ball">${botsLabel} <input data-k="bots" type="number" min="${botsMin}" max="5"></label>
-  <div class="pu-header">⚡ Enabled Powerups</div>
+  <details class="fold" data-fold="pu"><summary class="pu-header">⚡ Enabled Powerups <span class="mapcount" data-pucount></span></summary>
   <div class="pu-grid">
     ${puIds.map(id => `<label class="pu-chip"><input type="checkbox" data-pu="${id}"> <span>${puInfo[id] ? puInfo[id].n : id}</span></label>`).join('')}
-  </div>`;
+  </div></details>
+  <details class="fold" data-fold="cfg"><summary class="pu-header">\u{1F4BE} Export / import / reset settings</summary>
+  <div class="row cfgbar" style="margin:0 0 6px"><button type="button" class="sec small" data-cfg="export" title="Save these settings to a file">\u2B07 Export settings</button><button type="button" class="sec small" data-cfg="import" title="Load settings from a file">\u2B06 Import settings</button><button type="button" class="sec small" data-cfg="reset" title="Put every option back to its default">\u21BA Reset to defaults</button><input type="file" accept=".json,application/json" hidden data-cfgfile><span class="cfgmsg" data-cfgmsg style="font-size:13px;color:var(--muted);align-self:center"></span></div></details>`;
 }
 
 const mapShown = cb => !cb.closest('.map-card').classList.contains('hidden');   // maps that suit the selected scoring mode
+function updatePUCount(el) { const all = [...el.querySelectorAll('[data-pu]')], c = el.querySelector('[data-pucount]'); if (c) c.textContent = `(${all.filter(x => x.checked).length} of ${all.length})`; }
 function updateMapCount(el) {
   const all = [...el.querySelectorAll('[data-map]')].filter(mapShown), n = all.filter(c => c.checked).length, t = all.length, c = el.querySelector('[data-mapcount]');
   if (c) c.textContent = n === 0 ? '(none ticked = all maps)' : n + ' of ' + t;
@@ -161,7 +166,7 @@ function wireMapPicker(el) {
     for (const cb of el.querySelectorAll('[data-map]')) if (mapShown(cb)) cb.checked = b.dataset.mapsel === 'all';
     updateMapCount(el); el.dispatchEvent(new Event('change', { bubbles: true }));
   });
-  el.addEventListener('change', e => { if (e.target.matches && e.target.matches('[data-map]')) updateMapCount(el); if (e.target.matches && e.target.matches('[data-k=mode]')) syncModeOptions(el, e.target.value); });
+  el.addEventListener('change', e => { if (e.target.matches && e.target.matches('[data-map]')) updateMapCount(el); if (e.target.matches && e.target.matches('[data-pu]')) updatePUCount(el); if (e.target.matches && e.target.matches('[data-k=mode]')) syncModeOptions(el, e.target.value); });
 }
 // options that belong to one scoring mode only show while that mode is selected
 function syncModeOptions(el, mode) {
@@ -176,13 +181,14 @@ function fillForm(el, v, disabled) {
   for (const i of el.querySelectorAll('[data-k]')) { const k = i.dataset.k; if (i.type === 'checkbox') i.checked = !!v[k]; else i.value = v[k]; i.disabled = !!disabled; }
   const sel = Array.isArray(v.arenas) ? v.arenas : A.list.map((_, i) => i);
   for (const cb of el.querySelectorAll('[data-map]')) { cb.checked = sel.includes(+cb.dataset.map); cb.disabled = !!disabled; }
-  for (const b of el.querySelectorAll('[data-mapsel]')) b.disabled = !!disabled;
+  for (const b of el.querySelectorAll('[data-mapsel],[data-cfg=import],[data-cfg=reset]')) b.disabled = !!disabled;
   updateMapCount(el); paintThumbs(el); syncModeOptions(el, v.mode || 'last');
   const enabledPUs = Array.isArray(v.pus) ? v.pus : (G.PU_IDS || []);
   for (const cb of el.querySelectorAll('[data-pu]')) {
     cb.checked = enabledPUs.includes(cb.dataset.pu);
     cb.disabled = !!disabled;
   }
+  updatePUCount(el);
 }
 
 function readForm(el) {
@@ -200,6 +206,33 @@ function readForm(el) {
 
 if ($('#spForm')) $('#spForm').innerHTML = formHTML('Opponents', 1);
 if ($('#lobForm')) $('#lobForm').innerHTML = formHTML('Bots (fills empty slots)', 0);
+if ($('#lobForm')) for (const e of $('#lobForm').querySelectorAll('[data-sponly]')) e.remove();   // single-player-only options
+// export / import / reset of the option form (single-player setup and the lobby)
+function cfgDefaults(el) { const d = G.sanitizeSettings({}); if (el === $('#spForm')) { d.bots = 3; d.ballSize = 2; } return d; }
+function cfgApply(el, s) {
+  s = G.sanitizeSettings(s); if (el === $('#spForm') && s.bots < 1) s.bots = 1;
+  fillForm(el, s, false);
+  if (el === $('#lobForm') && room && room.hostId === myId) wsSend({ t: 'settings', settings: readForm(el) });
+}
+function cfgMsg(el, t, bad) { const m = el.querySelector('[data-cfgmsg]'); if (m) { m.textContent = t; m.style.color = bad ? '#ff9c8f' : '#7fe08a'; clearTimeout(m._t); m._t = setTimeout(() => { m.textContent = ''; }, 3500); } }
+for (const el of [$('#spForm'), $('#lobForm')]) if (el) {
+  el.addEventListener('click', e => {
+    const b = e.target.closest ? e.target.closest('[data-cfg]') : null; if (!b || b.disabled) return;
+    if (b.dataset.cfg === 'export') {
+      const blob = new Blob([JSON.stringify({ game: 'MiniGums', version: 1, settings: readForm(el) }, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'minigums-settings.json'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      cfgMsg(el, 'Settings exported.');
+    } else if (b.dataset.cfg === 'import') { const f = el.querySelector('[data-cfgfile]'); if (f) { f.value = ''; f.click(); } }
+    else if (b.dataset.cfg === 'reset') { cfgApply(el, cfgDefaults(el)); cfgMsg(el, 'Settings reset to the defaults.'); }
+  });
+  const f = el.querySelector('[data-cfgfile]');
+  if (f) f.addEventListener('change', () => {
+    const file = f.files && f.files[0]; if (!file) return;
+    const rd = new FileReader();
+    rd.onload = () => { try { const j = JSON.parse(String(rd.result)); const s = j && typeof j === 'object' ? (j.settings && typeof j.settings === 'object' ? j.settings : j) : null; if (!s || Array.isArray(s)) throw 0; cfgApply(el, s); cfgMsg(el, 'Settings imported.'); } catch (e) { cfgMsg(el, 'That file is not a MiniGums settings file.', true); } };
+    rd.onerror = () => cfgMsg(el, 'Could not read that file.', true); rd.readAsText(file);
+  });
+}
 if ($('#spForm')) for (const e of $('#spForm').querySelectorAll('[data-lobonly]')) e.remove();   // online-only options
 wireMapPicker($('#spForm')); wireMapPicker($('#lobForm'));
 if ($('#btnSP')) $('#btnSP').onclick = () => { fillForm($('#spForm'), spSettings); show('setup'); };
@@ -207,7 +240,7 @@ if ($('#spBack')) $('#spBack').onclick = () => show('menu');
 if ($('#spStart')) $('#spStart').onclick = () => {
   spSettings = readForm($('#spForm')); if (spSettings.bots < 1) spSettings.bots = 1;
   localStorage.mgSP = JSON.stringify(spSettings);
-  const humans = [{ id: 'me', name: (myName || 'You').slice(0, 14), variant: myVar, team: 0 }];
+  const humans = [{ id: 'me', name: (myName || 'You').slice(0, 14), variant: myVar, team: spSettings.myTeam === 1 ? 1 : spSettings.myTeam === 0 || spSettings.myTeam === undefined ? 0 : Math.floor(Math.random() * 2) }];
   const inf = spSettings.mode === 'ball' ? G.fillTeams(humans, spSettings.ballSize || 2) : G.fillBots(humans, spSettings.bots);
   startGame('sp', inf, spSettings, new G.Match(spSettings, inf));
 };

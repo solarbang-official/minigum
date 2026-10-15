@@ -176,6 +176,11 @@
   #leave { position: fixed; top: 12px; right: 12px; z-index: 5; padding: 8px 16px; font-size: 14px; }
   .hint { color: var(--muted); font-size: 13px; margin-top: 16px; line-height: 1.5; background: var(--panel-dark); padding: 10px 14px; border-radius: 12px; border: 2px solid #432a5e; }
   
+  details.fold > summary { cursor: pointer; list-style: none; user-select: none; }
+  details.fold > summary::-webkit-details-marker { display: none; }
+  details.fold > summary::before { content: '\25B8'; display: inline-block; margin-right: 6px; transition: transform .15s; }
+  details.fold[open] > summary::before { transform: rotate(90deg); }
+  details.fold .cfgbar { margin-top: 8px !important; }
   .pu-header { margin-top: 16px; font-weight: 700; font-size: 16px; color: var(--accent); text-shadow: 0 2px 0 var(--border); }
   .pu-grid { 
     display: grid; 

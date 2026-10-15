@@ -61,7 +61,7 @@ WebSocket upgrades (the client uses `wss://` automatically on https pages). Ngin
 - **Obstacles**: maps are built from rocks, crates, hedges/bushes, barrels and stone pillars (each map has its own
   look: meadow, sand, stone courtyard or forest). The Disguise power-up turns you into one of the obstacle types used on the
   current map, so you blend in.
-- **Boomerang options** (host/single-player setup, all off by default except bounce): **Pull back**: hold the throw button (or press E/R)
+- **Boomerang options** (host/single-player setup, all off by default except bounce and pull back): **Pull back**: hold the throw button (or press E/R)
   to pull your boomerangs back; when off, a boomerang that has landed is only retrieved by walking over it.
   **Homing boomerangs**: thrown boomerangs curve slightly towards an enemy in front of them.
   Returning boomerangs still collide with obstacles: the boomerang still tries to fly back, and when it hits an obstacle it
@@ -87,6 +87,11 @@ WebSocket upgrades (the client uses `wss://` automatically on https pages). Ngin
   is hidden because bots are decided by the team sizes.
 - **Falling**: standing over water or a pit (or outside the arena for 3 s) makes your gum shake violently for about half a second, which is your chance to walk or dash out. If you stay, it shrinks and spins away (about three quarters of a second, no control) and you are out.
 - **Pull Back** (when enabled) only starts working once a thrown boomerang has covered at least half of its range or has been out for 0.5 s (a dropped boomerang can always be pulled). Deflecting a boomerang with a slash plays a distinct ringing parry sound.
+- **Pull Back is on by default** in every mode (untick it in the options to turn it off).
+- **Dead players' inputs are ignored**: anything pressed while you are down (throw, slash, dash, pull back) is discarded, so nothing fires when you respawn.
+- **Boomerang Ball in single player** has a *Your team* option (Blue, Red or Random).
+- **Collapsible sections**: *Enabled Powerups* and *Export / import / reset settings* are folded away at the bottom of the options (click the heading to open them).
+- **Settings buttons** (in that last section, in both the single-player setup and the lobby): *Export settings* saves the current options to a `minigums-settings.json` file, *Import settings* loads one back (in a lobby only the host can import or reset, and everyone sees the result), and *Reset to defaults* puts every option back to its default.
 - Bots get a random name and a random colour (not shared with anyone else) every match.
 - **Hide & Seek tweaks**: a hider who has already turned into a prop keeps that prop when the seeking starts (only hiders who were still moving get a random one); the seeker walks at 0.8x speed.
 - **Boomerang Ball physics**: the ball collides with obstacles as a true circle: it bounces off along the surface, slides along walls and rolls round corners, and can't be pushed into or stuck inside one.
