@@ -92,8 +92,8 @@ addEventListener('pointerdown', () => { ensureAudio(); playBGM(); });
 const sfxVol = () => cfg.sfx * cfg.master;
 
 // ---------- UI ----------
-const panels = { menu: $('#menu'), setup: $('#setup'), lobby: $('#lobby') };
-function show(p) { setMusicCtx(p === 'menu' || p === 'setup' ? 'menu' : p === 'lobby' ? 'lobby' : 'game'); const ui = $('#ui'); if (ui) ui.classList.toggle('hidden', !p); for (const k in panels) if (panels[k]) panels[k].classList.toggle('hidden', k !== p); }
+const panels = { menu: $('#menu'), setup: $('#setup'), lobby: $('#lobby'), acc: $('#acc') };
+function show(p) { setMusicCtx(p === 'menu' || p === 'setup' ? 'menu' : p === 'lobby' || p === 'acc' ? 'lobby' : 'game'); const ui = $('#ui'); if (ui) ui.classList.toggle('hidden', !p); for (const k in panels) if (panels[k]) panels[k].classList.toggle('hidden', k !== p); }
 function buildVariantPicker(el, taken, onPick) {
   if (!el) return;
   el.innerHTML = '';
@@ -222,6 +222,32 @@ function startGame(m, inf, set, mt) {
   playBGM();
 }
 
+// ---------- accolades screen (end of every match) ----------
+let accKind = 'mp';
+function showAccolades(acc, kind) {
+  closeSettings(); setPause(false); releaseInput(); leaveArmed = false;
+  accKind = kind; mode = 'acc'; match = null; lastSnap = null; if ($('#leave')) $('#leave').classList.add('hidden');
+  if (!acc) { acc = { title: 'Match over', sub: '', players: [] }; }
+  $('#accTitle').textContent = '\u{1F3C6} ' + acc.title;
+  $('#accSub').textContent = acc.sub || '';
+  let k = 0;
+  $('#accGrid').innerHTML = acc.players.map(p => {
+    const d0 = (k++ * 0.12).toFixed(2), col = p.team === 0 || p.team === 1 ? TEAM[p.team].c : '';
+    const rk = p.champ ? '\u{1F451}' : '#' + p.rank;
+    return `<div class="acard${p.champ ? ' champ' : ''}${p.id === myId ? ' me' : ''}" style="--d:${d0}s${col ? ';border-color:' + col : ''}">
+      <div class="ahead"><img src="${fishSrc(p.variant)}"><div class="anm">${esc(p.name)}${p.bot ? ' <small>BOT</small>' : ''}</div>
+      <div class="arank"><b>${rk}</b><span>${p.score} ${esc(p.score === 1 ? (acc.scoreLabel || 'points').replace(/s\b/g, '') : (acc.scoreLabel || 'points'))}</span></div></div>
+      ${p.awards.map((a, j) => `<div class="award ${a.tone}" style="--d:${(+d0 + 0.25 + j * 0.18).toFixed(2)}s" title="${esc(a.desc)}"><div class="ai">${a.icon}</div><div><div class="an">${esc(a.name)}</div><div class="ad">${esc(a.detail || a.desc)}</div></div></div>`).join('')}
+    </div>`;
+  }).join('');
+  show('acc');
+}
+if ($('#accStay')) $('#accStay').onclick = () => {
+  if (accKind === 'sp') { mode = 'menu'; fillForm($('#spForm'), spSettings); show('setup'); }   // single player has no lobby: back to its setup screen
+  else { mode = 'lobby'; show('lobby'); if (room) renderLobby(); }
+};
+if ($('#accLeave')) $('#accLeave').onclick = () => { if (accKind !== 'sp') wsSend({ t: 'leave' }); toMenu(); };
+
 function toMenu(err) {
   closeSettings(); setPause(false); leaveArmed = false;
   mode = 'menu'; match = null; lastSnap = null; room = null; if ($('#leave')) $('#leave').classList.add('hidden');
@@ -243,7 +269,8 @@ function connect(then) {
     let m; try { m = JSON.parse(ev.data); } catch (e) { return; }
     if (m.t === 'hello') myId = m.id;
     else if (m.t === 'err') { if ($('#menuErr')) $('#menuErr').textContent = m.m; }
-    else if (m.t === 'room') { room = m; if (mode !== 'mp') { mode = 'lobby'; show('lobby'); } renderLobby(); }
+    else if (m.t === 'room') { room = m; if (mode !== 'mp' && mode !== 'acc') { mode = 'lobby'; show('lobby'); } renderLobby(); }   // on the accolades screen the lobby waits until the player chooses to stay
+    else if (m.t === 'acc') { showAccolades(m.acc, 'mp'); }
     else if (m.t === 'start') { startGame('mp', m.infos, m.settings, null); }
     else if (m.t === 's') { lastSnap = m; lastSnapAt = performance.now(); reconcile(m); playEvents(m.ev); }
     else if (m.t === 'pong') { onPong(m.c); }
@@ -1098,7 +1125,7 @@ function drawHUD(snap, me, now) {
   const big = (txt, y, col) => { ctx.font = 'bold 64px sans-serif'; ctx.lineWidth = 8; ctx.strokeStyle = '#120b1c'; ctx.fillStyle = col || '#ffc83b'; ctx.strokeText(txt, 480, y); ctx.fillText(txt, 480, y); };
   if (snap.ph === 'countdown') { big(String(Math.ceil(snap.tm)), 330); ctx.font = 'bold 20px sans-serif'; ctx.fillStyle = '#fff'; ctx.fillText(snap.bl ? 'Boomerang Ball' : `Round ${snap.rd}`, 480, 270); if (snap.bl && teamOf[myId] !== undefined) { ctx.fillStyle = TEAM[teamOf[myId]].c; ctx.fillText(`You are on the ${TEAM[teamOf[myId]].n} team \u2014 push the ball into the ${TEAM[1 - teamOf[myId]].n} goal ${teamOf[myId] === 0 ? '\u2192' : '\u2190'}`, 480, 390); } if (snap.hs) { ctx.fillStyle = '#ffc83b'; ctx.fillText(`${names[snap.hs.sk] || '?'} is the seeker \u2014 everyone else, get ready to hide!`, 480, 390); } if (snap.gm) { ctx.fillStyle = '#ffe36b'; ctx.fillText(`Grab the Golden Boomerang and hold it for ${snap.gm} seconds to win the round!`, 480, 390); } }
   else if (snap.ph === 'over') { if (snap.bl) { if (snap.bw !== undefined && TEAM[snap.bw]) big(`${TEAM[snap.bw].n} team wins!`, 330, TEAM[snap.bw].c); } else if (!snap.hs) big(snap.w ? `${names[snap.w] || '?'} wins the round!` : 'Draw!', 330); }
-  else if (snap.ph === 'end') { big(snap.bl ? (TEAM[snap.ct] ? `${TEAM[snap.ct].n} team wins the match!` : 'Full time!') : snap.ch ? `${names[snap.ch] || '?'} wins the match!` : "It's a tie!", 320, '#7fe08a'); ctx.font = 'bold 20px sans-serif'; ctx.fillStyle = '#fff'; ctx.fillText('Returning to ' + (mode === 'mp' ? 'lobby' : 'menu') + '…', 480, 370); }
+  else if (snap.ph === 'end') { big(snap.bl ? (TEAM[snap.ct] ? `${TEAM[snap.ct].n} team wins the match!` : 'Full time!') : snap.ch ? `${names[snap.ch] || '?'} wins the match!` : "It's a tie!", 320, '#7fe08a'); ctx.font = 'bold 20px sans-serif'; ctx.fillStyle = '#fff'; ctx.fillText('Accolades coming up…', 480, 370); }
   if (cfg.hints && performance.now() - hintT < 12000 && snap.ph !== 'end' && !isBlind(snap)) { ctx.font = '13px sans-serif'; ctx.fillStyle = 'rgba(255,255,255,0.75)'; ctx.fillText('WASD move · aim mouse · hold + release click to throw' + (curSet.pullBack ? ' · hold click to pull back' : ' · walk over boomerangs to pick them up') + ' · right-click slash · Space dash', 480, 586); }
 }
 
@@ -1116,7 +1143,7 @@ function frame(nowT) {
     latch.t = latch.m = latch.d = latch.r = false;
     acc += dtReal; while (acc >= 1 / 60) { match.step(1 / 60); acc -= 1 / 60; }
     snap = match.snapshot(); snap._sp = true; lastSnap = snap; playEvents(snap.ev);
-    if (match.finished) { toMenu(); }
+    if (match.finished) { showAccolades(match.accolades, 'sp'); }
   } else if (mode === 'mp') {
     netAcc += dtReal; let n = 0;
     while (netAcc >= G.DT && n < 4) { mpTick(); netAcc -= G.DT; n++; }

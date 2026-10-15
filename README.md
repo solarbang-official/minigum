@@ -99,6 +99,30 @@ WebSocket upgrades (the client uses `wss://` automatically on https pages). Ngin
 - A new online room starts with 0 bots (the host can add some; empty slots are only filled when fewer than 2 people join).
 - **Fire and Ice boomerangs never hurt the player who threw them** (for example when it flies back through its own trail).
 
+## Accolades (end-of-match awards)
+
+When a match ends, in every mode, everyone (players and spectators) is taken to the **accolades screen** instead of straight back
+to the lobby. It lists every player in the match, ranked, with up to **three awards** describing how they played, which can be
+flattering (Ronaldo, Sharpshooter, Untouchable) or not (Cannon fodder, Swimmer, Most flammable). Each award shows a one-line detail
+("14 powerups", "5 kills on one victim") and the rule behind it as a tooltip. The screen has **Stay in lobby** (online: back to the
+room lobby; single player: back to the setup screen) and **Leave lobby** (back to the main menu) buttons. Players who press Stay
+can start another match as normal; the screen is not forced away by lobby updates while someone is still reading it.
+
+- **74 awards** (`shared/accolades.js`), each limited to the modes it makes sense in (e.g. Ronaldo / Hat Trick / Golazo only in Boomerang
+  Ball, Bloodhound / Quick Draw only in Hide & Seek, Gold digger only in Golden Boomerang). Examples: Indiscriminate, Ronaldo, Hat Trick,
+  Most flammable, Ice breaker, Most bamboozled, Close second, Cannon fodder, Swimmer, Greediest, Gold digger, Most chilled, Most punctual.
+- **Priority and randomness**: every award is *High* or *Low* priority. A player's awards are chosen at random from the High ones they
+  earned first, and Low ones only fill any remaining slots. A player who earned nothing gets **Most punctual**.
+- "Most ..." awards go to a single player; a tie for the top means nobody gets that award. Awards with a threshold (e.g. Most flammable
+  needs 3 s on fire, Most bamboozled 11 s) are not given below it.
+- **Indiscriminate** counts hits on teammates. Boomerang Ball is the only team mode and has no friendly fire, so it counts the harmless
+  hits that were ignored.
+- **Stats**: the engine records them per player for the whole match (kills by type, deaths, goals and assists, time on fire / frozen /
+  bamboozled / holding the golden boomerang, distance, dashes, power-ups, hide & seek finds, and so on) and freezes them the moment each
+  round is decided. The result is built once on the server (or in the browser in single player) when the match ends and sent as a single
+  `acc` message. To add an award, add a `most(...)` / `def(...)` line in `shared/accolades.js`; if it needs a new stat, add the key to `NUM`
+  there and bump it from `shared/game.js`.
+
 ## Controls
 
 | Action | Keys |
@@ -121,6 +145,7 @@ blue-book spawn rate (off/slow/normal/fast), boomerang wall bounce (on/off), los
     server.js          HTTP static server + rooms + WebSocket protocol
     shared/arenas.js   the 37 arenas (data-driven; add yours to `specs`)
     shared/game.js     engine: rounds, boomerangs, power-ups, AI, match flow (used by server AND browser)
+    shared/accolades.js  end-of-match awards: stat tracking defaults, the 74 award definitions, award selection
     public/            index.html + client.js (menus, lobby, canvas rendering, input, sounds)
 
 Rules implemented: slashing an enemy boomerang deflects it along your aim (it can kill its thrower, and you get the credit); one hit kills (Shield absorbs one); thrown boomerangs bounce off walls up to 3 times (half speed each time), then drop at the next wall and can be recalled;

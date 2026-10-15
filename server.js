@@ -102,9 +102,13 @@ function loop(room) {
   if (due) broadcast(room, Object.assign({ t: 's' }, match.snapshot()));
   schedule(room);
 }
+// the match is over: everyone (players and spectators) gets the accolades screen. The room itself drops back to the lobby, but each
+// client stays on the accolades screen until it chooses "Stay in lobby" or "Leave lobby".
 function endMatch(room) {
+  const acc = room.match && room.match.accolades;
   clearTimeout(room.timer); room.match = null;
-  broadcast(room, { t: 'lobby' }); broadcast(room, roomInfo(room));
+  broadcast(room, roomInfo(room));
+  broadcast(room, acc ? { t: 'acc', acc } : { t: 'lobby' });
 }
 
 function leaveRoom(c) {
