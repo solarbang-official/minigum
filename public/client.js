@@ -95,17 +95,53 @@ const sfxVol = () => cfg.sfx * cfg.master;
 // ---------- UI ----------
 const panels = { menu: $('#menu'), setup: $('#setup'), lobby: $('#lobby'), acc: $('#acc') };
 function show(p) { setMusicCtx(p === 'menu' || p === 'setup' ? 'menu' : p === 'lobby' || p === 'acc' ? 'lobby' : 'game'); const ui = $('#ui'); if (ui) ui.classList.toggle('hidden', !p); for (const k in panels) if (panels[k]) panels[k].classList.toggle('hidden', k !== p); }
+let popNext = -1;
 function buildVariantPicker(el, taken, onPick) {
   if (!el) return;
   el.innerHTML = '';
   V.forEach((v, i) => {
-    const b = document.createElement('button'); b.className = 'vsw' + (i === myVar ? ' sel' : '') + (taken.has(i) && i !== myVar ? ' taken' : '');
-    b.title = v.name; b.innerHTML = `<img src="${fishSrc(i)}">`;
-    b.onclick = () => { if (taken.has(i) && i !== myVar) return; onPick(i); };
+    const b = document.createElement('button'); b.className = 'vsw' + (i === myVar ? ' sel' : '') + (i === popNext ? ' pop' : '') + (taken.has(i) && i !== myVar ? ' taken' : '');
+    b.style.setProperty('--h', v.body); b.title = v.name; b.innerHTML = `<img src="${fishSrc(i)}">`;
+    b.onclick = () => { if (taken.has(i) && i !== myVar) return; popNext = i; onPick(i); };
     el.appendChild(b);
   });
+  popNext = -1;
 }
 function pickVariantMenu(i) { myVar = i; localStorage.mgVar = i; buildVariantPicker($('#variants'), new Set(), pickVariantMenu); }
+
+// ---------- menu backdrop: drifting bubbles and dust motes ----------
+(function () {
+  const cv = document.getElementById('bgfx'), ui = document.getElementById('ui'); if (!cv || !ui) return;
+  const g = cv.getContext('2d'), still = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let W = 0, H = 0, ps = [], last = 0, raf = 0;
+  const rnd = (a, b) => a + Math.random() * (b - a);
+  function mk(init) { const bub = Math.random() < 0.45; return { b: bub, x: rnd(0, W), y: init ? rnd(0, H) : H + rnd(10, 60), r: bub ? rnd(6, 26) : rnd(1, 2.4), v: bub ? rnd(14, 34) : rnd(5, 14), ph: rnd(0, 7), sw: rnd(8, 26), a: bub ? rnd(0.12, 0.3) : rnd(0.25, 0.6), c: ['255,255,255', '200,170,255', '255,214,120', '150,200,255'][(Math.random() * 4) | 0] }; }
+  function size() { const d = Math.min(devicePixelRatio || 1, 1.5); W = innerWidth; H = innerHeight; cv.width = W * d; cv.height = H * d; g.setTransform(d, 0, 0, d, 0, 0); const n = Math.round(Math.min(90, W * H / 14000)); while (ps.length < n) ps.push(mk(true)); ps.length = n; }
+  function draw(t) {
+    g.clearRect(0, 0, W, H);
+    for (const p of ps) {
+      const x = p.x + Math.sin(t / 1800 * (p.b ? 0.6 : 1) + p.ph) * p.sw;
+      if (p.b) {
+        const gr = g.createRadialGradient(x - p.r * .3, p.y - p.r * .3, p.r * .1, x, p.y, p.r);
+        gr.addColorStop(0, `rgba(${p.c},${p.a * 0.35})`); gr.addColorStop(1, `rgba(${p.c},${p.a * 0.08})`);
+        g.fillStyle = gr; g.beginPath(); g.arc(x, p.y, p.r, 0, 7); g.fill();
+        g.strokeStyle = `rgba(${p.c},${p.a})`; g.lineWidth = 1.2; g.stroke();
+        g.fillStyle = `rgba(255,255,255,${p.a * 1.4})`; g.beginPath(); g.arc(x - p.r * .35, p.y - p.r * .35, Math.max(1, p.r * .16), 0, 7); g.fill();
+      } else { g.fillStyle = `rgba(${p.c},${p.a * (0.6 + 0.4 * Math.sin(t / 700 + p.ph))})`; g.beginPath(); g.arc(x, p.y, p.r, 0, 7); g.fill(); }
+    }
+  }
+  function frame(t) {
+    raf = 0; if (ui.classList.contains('hidden') || document.hidden) return;
+    const dt = Math.min(0.05, (t - last) / 1000 || 0); last = t;
+    for (let i = 0; i < ps.length; i++) { const p = ps[i]; p.y -= p.v * dt; if (p.y < -p.r - 20) ps[i] = mk(false); }
+    draw(t); raf = requestAnimationFrame(frame);
+  }
+  function kick() { if (!raf && !ui.classList.contains('hidden') && !document.hidden) { last = performance.now(); raf = requestAnimationFrame(frame); } }
+  size(); addEventListener('resize', () => { size(); if (still) draw(0); });
+  if (still) { draw(0); return; }
+  new MutationObserver(kick).observe(ui, { attributes: true, attributeFilter: ['class'] });
+  document.addEventListener('visibilitychange', kick); kick();
+})();
 
 if ($('#name')) {
   $('#name').value = myName;
@@ -261,22 +297,28 @@ function showAccolades(acc, kind) {
   closeSettings(); setPause(false); releaseInput(); leaveArmed = false;
   accKind = kind; mode = 'acc'; match = null; lastSnap = null; if ($('#leave')) $('#leave').classList.add('hidden');
   if (!acc) { acc = { title: 'Match over', sub: '', players: [] }; }
-  $('#accTitle').textContent = '\u{1F3C6} ' + acc.title;
+  const winCol = acc.champTeam === 0 || acc.champTeam === 1 ? TEAM[acc.champTeam].c : '#ffc83b';
+  $('#accTitle').textContent = acc.title; $('#acc').style.setProperty('--tc', winCol);
   $('#accSub').textContent = acc.sub || '';
+  if ($('#accStay')) $('#accStay').textContent = kind === 'sp' ? 'Rematch' : 'Stay in lobby';
+  if ($('#accLeave')) $('#accLeave').textContent = kind === 'sp' ? 'Back to menu' : 'Leave lobby';
+  const crown = '<svg viewBox="0 0 24 24"><path d="M3 18l-1-11 5.5 4L12 4l4.5 7L22 7l-1 11z"/><rect x="3" y="19.5" width="18" height="2.4" rx="1"/></svg>';
   let k = 0;
   $('#accGrid').innerHTML = acc.players.map(p => {
-    const d0 = (k++ * 0.12).toFixed(2), col = p.team === 0 || p.team === 1 ? TEAM[p.team].c : '';
-    const rk = p.champ ? '\u{1F451}' : '#' + p.rank;
-    return `<div class="acard${p.champ ? ' champ' : ''}${p.id === myId ? ' me' : ''}" style="--d:${d0}s${col ? ';border-color:' + col : ''}">
-      <div class="ahead"><img src="${fishSrc(p.variant)}"><div class="anm">${esc(p.name)}${p.bot ? ' <small>BOT</small>' : ''}</div>
-      <div class="arank"><b>${rk}</b><span>${p.score} ${esc(p.score === 1 ? (acc.scoreLabel || 'points').replace(/s\b/g, '') : (acc.scoreLabel || 'points'))}</span></div></div>
-      ${p.awards.map((a, j) => `<div class="award ${a.tone}" style="--d:${(+d0 + 0.25 + j * 0.18).toFixed(2)}s" title="${esc(a.desc)}"><div class="ai">${a.icon}</div><div><div class="an">${esc(a.name)}</div><div class="ad">${esc(a.detail || a.desc)}</div></div></div>`).join('')}
+    const d0 = (k++ * 0.12).toFixed(2), tc = p.team === 0 || p.team === 1 ? TEAM[p.team].c : '';
+    const cc = tc ? tc + (p.champ ? 'cc' : '88') : (p.champ ? 'rgba(255,200,59,.65)' : 'rgba(150,130,200,.5)');
+    const cb = tc ? tc + '99' : 'rgba(255,200,59,.38)';
+    return `<div class="acard${p.champ ? ' champ' : ''}${p.id === myId ? ' me' : ''}" data-team="${p.team}" style="--d:${d0}s;--cc:${cc};--cb:${cb}">
+      <div class="abadge"><img src="${fishSrc(p.variant)}">${p.champ ? `<div class="acrown">${crown}</div>` : ''}</div>
+      <div class="anm">${esc(p.name)}${p.bot ? ' <small>BOT</small>' : ''}</div>
+      <div class="asc">${p.score} ${esc(p.score === 1 ? (acc.scoreLabel || 'points').replace(/s\b/g, '') : (acc.scoreLabel || 'points'))}</div>
+      <div class="apills">${p.awards.map((a, j) => `<div class="award ${a.tone}" tabindex="0" style="--d:${(+d0 + 0.25 + j * 0.18).toFixed(2)}s${p.team === 0 || p.team === 1 ? ';--pc:' + (p.champ ? (p.team === 1 ? '#ff7568' : '#78a9ff') : '#7fb2ff') : ''}" title="${esc(a.desc)}">${esc(a.name)}<div class="ad">${esc(a.detail || a.desc)}</div></div>`).join('')}</div>
     </div>`;
   }).join('');
   show('acc');
 }
 if ($('#accStay')) $('#accStay').onclick = () => {
-  if (accKind === 'sp') { mode = 'menu'; fillForm($('#spForm'), spSettings); show('setup'); }   // single player has no lobby: back to its setup screen
+  if (accKind === 'sp') { if ($('#spStart')) $('#spStart').click(); }   // single player: rematch with the same settings
   else { mode = 'lobby'; show('lobby'); if (room) renderLobby(); }
 };
 if ($('#accLeave')) $('#accLeave').onclick = () => { if (accKind !== 'sp') wsSend({ t: 'leave' }); toMenu(); };
@@ -940,18 +982,18 @@ function drawGrave(x, y, v, name, age) {
   ctx.beginPath(); ctx.moveTo(-13, -3); ctx.lineTo(-13, -27); ctx.arc(0, -27, 13, Math.PI, 0); ctx.lineTo(13, -3); ctx.closePath();
   ctx.fillStyle = col; ctx.fill(); ctx.lineWidth = 3; ctx.lineJoin = 'round'; ctx.strokeStyle = dk; ctx.stroke();
   ctx.fillStyle = 'rgba(255,255,255,0.28)'; ctx.fillRect(-9, -33, 4, 24);
-  ctx.fillStyle = dk; ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic'; ctx.fillText('RIP', 1, -26);
+  ctx.fillStyle = dk; ctx.font = 'bold 10px Fredoka, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic'; ctx.fillText('RIP', 1, -26);
   ctx.fillRect(-1.5, -22, 3, 11); ctx.fillRect(-5, -19, 10, 3);
   ctx.fillStyle = '#6b4a2b'; ctx.beginPath(); ctx.ellipse(0, -2, 19, 6, 0, 0, 7); ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = '#3d2813'; ctx.stroke();
   ctx.restore();
-  if (cfg.names && name) { ctx.save(); ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center'; ctx.lineWidth = 3; ctx.strokeStyle = '#120b1c'; ctx.fillStyle = '#fff'; ctx.globalAlpha = 0.8; ctx.strokeText(name, x, y + 34); ctx.fillText(name, x, y + 34); ctx.restore(); }
+  if (cfg.names && name) { ctx.save(); ctx.font = 'bold 11px Fredoka, sans-serif'; ctx.textAlign = 'center'; ctx.lineWidth = 3; ctx.strokeStyle = '#120b1c'; ctx.fillStyle = '#fff'; ctx.globalAlpha = 0.8; ctx.strokeText(name, x, y + 34); ctx.fillText(name, x, y + 34); ctx.restore(); }
 }
 function pos(p, age) { const a = Math.min(age, 0.07); return [p.x + p.vx * a, p.y + p.vy * a]; }
 
 function draw(snap, age, now) {
   if (!ctx) return;
   ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = '#1c1427'; ctx.fillRect(0, 0, cv.width, cv.height);
-  if (!snap) { ctx.fillStyle = '#fff'; ctx.font = `${24 * dpr}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText('Waiting for match…', cv.width / 2, cv.height / 2); return; }
+  if (!snap) { ctx.fillStyle = '#fff'; ctx.font = `${24 * dpr}px Fredoka, sans-serif`; ctx.textAlign = 'center'; ctx.fillText('Waiting for match…', cv.width / 2, cv.height / 2); return; }
   ctx.setTransform(sc, 0, 0, sc, offX, offY);
   ctx.save(); ctx.beginPath(); ctx.rect(0, 0, 960, 640); ctx.clip();
   const arena = A.list[snap.ar];
@@ -1003,7 +1045,7 @@ function draw(snap, age, now) {
       ctx.save(); ctx.globalAlpha = 1 - f * 0.6; ctx.translate(x, y); ctx.rotate(f * f * 14 + f * 4); ctx.scale(0.72 * k, 0.72 * k);
       if (img0 && img0.complete) ctx.drawImage(img0, -26.85, -23.7, 53.7, 47.44); ctx.restore(); ctx.setTransform(sc, 0, 0, sc, offX, offY); continue;
     }
-    if (!p.al) { if (!p.dc) { ctx.save(); ctx.globalAlpha = 0.5; ctx.fillStyle = '#fff'; ctx.font = 'bold 20px sans-serif'; ctx.textAlign = 'center'; ctx.restore(); } continue; }
+    if (!p.al) { if (!p.dc) { ctx.save(); ctx.globalAlpha = 0.5; ctx.fillStyle = '#fff'; ctx.font = 'bold 20px Fredoka, sans-serif'; ctx.textAlign = 'center'; ctx.restore(); } continue; }
     ctx.save();
     if (p.gh && snap.gm) drawGoldAura(x, y, p.gt || 0, snap.gm, now);
     if (p.ds >= 0 && !p.dc) { drawDisguise(p.ds, x, y); ctx.restore(); continue; }   // no shadow: real props don't have one either
@@ -1030,9 +1072,9 @@ function draw(snap, age, now) {
     if (lmbHeld && !recallHold && !lmbSlash && cfg.aimGuide && p.id === myId) { ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 3; ctx.setLineDash([2, 10]); ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(x + Math.cos(aimAngle) * 26, y + Math.sin(aimAngle) * 26); ctx.lineTo(x + Math.cos(aimAngle) * 190, y + Math.sin(aimAngle) * 190); ctx.stroke(); ctx.setLineDash([]); ctx.lineCap = 'butt'; }
     const slv = shownSlash(p, now);
     if (slv > 0) { ctx.strokeStyle = `rgba(255,255,255,${slv})`; ctx.lineWidth = 6; ctx.beginPath(); ctx.arc(x, y, 38, aimAngle - 1.3 + (1 - slv) * 0.8, aimAngle + 1.3 - slv * 0.2 * 0); ctx.stroke(); }
-    if (p.bm) { ctx.fillStyle = '#ff6b6b'; ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('?!', x, y - 32); }
+    if (p.bm) { ctx.fillStyle = '#ff6b6b'; ctx.font = 'bold 14px Fredoka, sans-serif'; ctx.textAlign = 'center'; ctx.fillText('?!', x, y - 32); }
     if (!p.dc && cfg.names) {
-      ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'center'; ctx.lineWidth = 3; ctx.strokeStyle = '#120b1c'; ctx.fillStyle = p.id === myId ? '#ffc83b' : (p.tm !== undefined && TEAM[p.tm] ? (p.tm === 0 ? '#a9ccff' : '#ffb3b3') : '#fff');
+      ctx.font = 'bold 12px Fredoka, sans-serif'; ctx.textAlign = 'center'; ctx.lineWidth = 3; ctx.strokeStyle = '#120b1c'; ctx.fillStyle = p.id === myId ? '#ffc83b' : (p.tm !== undefined && TEAM[p.tm] ? (p.tm === 0 ? '#a9ccff' : '#ffb3b3') : '#fff');
       const nm = names[p.id] || ''; ctx.strokeText(nm, x, y - 28); ctx.fillText(nm, x, y - 28);
     }
     ctx.restore();
@@ -1072,57 +1114,57 @@ function drawHUD(snap, me, now) {
   if (!ctx) return;
   ctx.setTransform(sc, 0, 0, sc, offX, offY);
   ctx.textBaseline = 'alphabetic';
-  if (mode === 'mp' && NET.rtt && cfg.ping) { ctx.save(); ctx.textAlign = 'right'; ctx.font = 'bold 12px sans-serif'; ctx.fillStyle = NET.rtt < 60 ? '#7fe08a' : NET.rtt < 120 ? '#ffc83b' : '#ff7a6b'; ctx.fillText(Math.round(NET.rtt) + ' ms', 952, 634); ctx.restore(); }
+  if (mode === 'mp' && NET.rtt && cfg.ping) { ctx.save(); ctx.textAlign = 'right'; ctx.font = 'bold 12px Fredoka, sans-serif'; ctx.fillStyle = NET.rtt < 60 ? '#7fe08a' : NET.rtt < 120 ? '#ffc83b' : '#ff7a6b'; ctx.fillText(Math.round(NET.rtt) + ' ms', 952, 634); ctx.restore(); }
 
-  if (cfg.fps) { ctx.save(); ctx.textAlign = 'left'; ctx.font = 'bold 12px sans-serif'; ctx.fillStyle = 'rgba(255,255,255,0.8)'; ctx.fillText(fps + ' fps', 8, 634); ctx.restore(); }
+  if (cfg.fps) { ctx.save(); ctx.textAlign = 'left'; ctx.font = 'bold 12px Fredoka, sans-serif'; ctx.fillStyle = 'rgba(255,255,255,0.8)'; ctx.fillText(fps + ' fps', 8, 634); ctx.restore(); }
   if (isBlind(snap)) {   // the seeker sees nothing while the others hide
     ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = '#0b0614'; ctx.fillRect(0, 0, cv.width, cv.height); ctx.restore();
-    ctx.textAlign = 'center'; ctx.lineWidth = 6; ctx.strokeStyle = '#120b1c'; ctx.fillStyle = '#ffc83b'; ctx.font = 'bold 40px sans-serif';
+    ctx.textAlign = 'center'; ctx.lineWidth = 6; ctx.strokeStyle = '#120b1c'; ctx.fillStyle = '#ffc83b'; ctx.font = 'bold 40px Fredoka, sans-serif';
     ctx.strokeText('You are the seeker', 480, 180); ctx.fillText('You are the seeker', 480, 180);
-    ctx.font = 'bold 20px sans-serif'; ctx.fillStyle = '#fff'; ctx.fillText(`Eyes closed \u2014 the hiders are hiding\u2026 ${Math.ceil(snap.hs.t)}`, 480, 225);
-    ctx.font = '15px sans-serif'; ctx.fillStyle = 'rgba(255,255,255,0.75)'; ctx.fillText('Afterwards they turn into props. Real props and players look alike \u2014 swing or throw at the ones you suspect.', 480, 450);
+    ctx.font = 'bold 20px Fredoka, sans-serif'; ctx.fillStyle = '#fff'; ctx.fillText(`Eyes closed \u2014 the hiders are hiding\u2026 ${Math.ceil(snap.hs.t)}`, 480, 225);
+    ctx.font = '15px Fredoka, sans-serif'; ctx.fillStyle = 'rgba(255,255,255,0.75)'; ctx.fillText('Afterwards they turn into props. Real props and players look alike \u2014 swing or throw at the ones you suspect.', 480, 450);
   }
   const real = snap.pl.filter(p => !p.dc);
-  ctx.font = 'bold 15px sans-serif'; ctx.textAlign = 'left';
+  ctx.font = 'bold 15px Fredoka, sans-serif'; ctx.textAlign = 'left';
   real.forEach((p, i) => {
-    const rw = snap.gm ? 236 : 170, y = 22 + i * 22; ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(6, y - 15, rw, 20);
+    const rw = snap.gm ? 236 : 170, y = 22 + i * 22; ctx.fillStyle = p.tm !== undefined && TEAM[p.tm] ? TEAM[p.tm].c + '55' : 'rgba(255,255,255,0.16)'; rrect(ctx, 6, y - 16, rw, 22, 11); ctx.fill();
     ctx.fillStyle = V[p.v] ? V[p.v].body : '#fff'; ctx.beginPath(); ctx.arc(18, y - 5, 7, 0, 7); ctx.fill(); ctx.strokeStyle = p.tm !== undefined && TEAM[p.tm] ? TEAM[p.tm].c : '#000'; ctx.lineWidth = p.tm !== undefined ? 3 : 2; ctx.stroke();
-    ctx.fillStyle = p.al ? '#fff' : '#ff9c8f'; ctx.fillText((p.al ? '' : '✖ ') + (names[p.id] || '').slice(0, 12), 30, y); ctx.textAlign = 'right'; ctx.fillStyle = '#ffc83b'; if (!snap.bl) ctx.fillText(String(snap.sc[p.id] || 0), rw, y); else if (!p.al && p.rt > 0) { ctx.font = 'bold 12px sans-serif'; ctx.fillStyle = '#ff9c8f'; ctx.fillText(p.rt.toFixed(1) + 's', rw, y); ctx.font = 'bold 15px sans-serif'; }
-    if (snap.gm) { ctx.font = 'bold 12px sans-serif'; ctx.fillStyle = p.gh ? '#ffe36b' : 'rgba(255,255,255,0.75)'; ctx.fillText((p.gh ? '\u2605 ' : '') + (p.gt || 0).toFixed(1) + 's', rw - 26, y); ctx.font = 'bold 15px sans-serif'; }
+    ctx.fillStyle = p.al ? '#fff' : '#ff9c8f'; ctx.fillText((p.al ? '' : '✖ ') + (names[p.id] || '').slice(0, 12), 30, y); ctx.textAlign = 'right'; ctx.fillStyle = '#ffc83b'; if (!snap.bl) ctx.fillText(String(snap.sc[p.id] || 0), rw, y); else if (!p.al && p.rt > 0) { ctx.font = 'bold 12px Fredoka, sans-serif'; ctx.fillStyle = '#ff9c8f'; ctx.fillText(p.rt.toFixed(1) + 's', rw, y); ctx.font = 'bold 15px Fredoka, sans-serif'; }
+    if (snap.gm) { ctx.font = 'bold 12px Fredoka, sans-serif'; ctx.fillStyle = p.gh ? '#ffe36b' : 'rgba(255,255,255,0.75)'; ctx.fillText((p.gh ? '\u2605 ' : '') + (p.gt || 0).toFixed(1) + 's', rw - 26, y); ctx.font = 'bold 15px Fredoka, sans-serif'; }
     ctx.textAlign = 'left';
   });
-  ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.font = '12px sans-serif'; ctx.fillText(`${snap.bl ? '' : (snap.sd ? 'SUDDEN DEATH' : 'Round ' + snap.rd) + ' · '}${(A.list[snap.ar] || {}).name || ''}${snap.tg && !snap.sd ? ' · first to ' + snap.tg + ' win' + (snap.tg === 1 ? '' : 's') : ''}`, 10, 22 + real.length * 22 + 6);
+  ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.font = '12px Fredoka, sans-serif'; ctx.fillText(`${snap.bl ? '' : (snap.sd ? 'SUDDEN DEATH' : 'Round ' + snap.rd) + ' · '}${(A.list[snap.ar] || {}).name || ''}${snap.tg && !snap.sd ? ' · first to ' + snap.tg + ' win' + (snap.tg === 1 ? '' : 's') : ''}`, 10, 22 + real.length * 22 + 6);
 
   if (me) {
-    const pus = me.pu || []; ctx.textAlign = 'center'; ctx.font = 'bold 13px sans-serif';
+    const pus = me.pu || []; ctx.textAlign = 'center'; ctx.font = 'bold 13px Fredoka, sans-serif';
     let x = 480 - pus.length * 75;
-    for (const id of pus) { const info = G.PU_INFO ? G.PU_INFO[id] : null; ctx.fillStyle = 'rgba(45,31,61,0.9)'; ctx.fillRect(x, 606, 146, 24); ctx.strokeStyle = '#ffc83b'; ctx.lineWidth = 2; ctx.strokeRect(x, 606, 146, 24); ctx.fillStyle = '#fff'; ctx.fillText(info ? info.n : id, x + 73, 623, 138); x += 150; }
+    for (const id of pus) { const info = G.PU_INFO ? G.PU_INFO[id] : null; ctx.fillStyle = 'rgba(255,200,59,0.85)'; rrect(ctx, x, 606, 146, 24, 8); ctx.fill(); ctx.fillStyle = '#3a2a00'; ctx.fillText(info ? info.n : id, x + 73, 623, 138); x += 150; }
     if (me.al) { ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(430, 592, 100, 8); ctx.fillStyle = me.cd > 0 ? '#8aa' : '#7fe08a'; ctx.fillRect(430, 592, 100 * (1 - me.cd / 1.0), 8); }
-    if (me.oo > 0) { ctx.fillStyle = '#ff5a4a'; ctx.font = 'bold 22px sans-serif'; ctx.fillText('RETURN TO THE ARENA!', 480, 60); }
-    if (me.gh) { ctx.fillStyle = '#ffe36b'; ctx.font = 'bold 20px sans-serif'; ctx.fillText('You have the Golden Boomerang! Boomerang power-ups are off.', 480, 118); }
-    if (!me.al && me.rt > 0) { ctx.fillStyle = '#fff'; ctx.font = 'bold 26px sans-serif'; ctx.strokeStyle = '#120b1c'; ctx.lineWidth = 5; const t = 'Respawning in ' + Math.ceil(me.rt) + '\u2026'; ctx.strokeText(t, 480, 300); ctx.fillText(t, 480, 300); }
-    if (me.bm) { ctx.fillStyle = '#ff9c8f'; ctx.font = 'bold 22px sans-serif'; ctx.fillText('BAMBOOZLED!', 480, 90); }
-    if (me.fr) { ctx.fillStyle = '#bfe6ff'; ctx.font = 'bold 22px sans-serif'; ctx.fillText('FROZEN! Mash DASH!', 480, 90); }
-    if (me.bn) { ctx.fillStyle = '#ffb347'; ctx.font = 'bold 22px sans-serif'; ctx.fillText('ON FIRE! Find wet ground!', 480, 90); }
+    if (me.oo > 0) { ctx.fillStyle = '#ff5a4a'; ctx.font = 'bold 22px Fredoka, sans-serif'; ctx.fillText('RETURN TO THE ARENA!', 480, 60); }
+    if (me.gh) { ctx.fillStyle = '#ffe36b'; ctx.font = 'bold 20px Fredoka, sans-serif'; ctx.fillText('You have the Golden Boomerang! Boomerang power-ups are off.', 480, 118); }
+    if (!me.al && me.rt > 0) { ctx.fillStyle = '#fff'; ctx.font = 'bold 26px Fredoka, sans-serif'; ctx.strokeStyle = '#120b1c'; ctx.lineWidth = 5; const t = 'Respawning in ' + Math.ceil(me.rt) + '\u2026'; ctx.strokeText(t, 480, 300); ctx.fillText(t, 480, 300); }
+    if (me.bm) { ctx.fillStyle = '#ff9c8f'; ctx.font = 'bold 22px Fredoka, sans-serif'; ctx.fillText('BAMBOOZLED!', 480, 90); }
+    if (me.fr) { ctx.fillStyle = '#bfe6ff'; ctx.font = 'bold 22px Fredoka, sans-serif'; ctx.fillText('FROZEN! Mash DASH!', 480, 90); }
+    if (me.bn) { ctx.fillStyle = '#ffb347'; ctx.font = 'bold 22px Fredoka, sans-serif'; ctx.fillText('ON FIRE! Find wet ground!', 480, 90); }
   }
 
   if (snap.ph !== 'end' && !snap.pl.some(p => p.id === myId)) {   // not in this round: a spectator, or someone who missed the sudden-death cut
-    ctx.save(); ctx.textAlign = 'center'; ctx.lineWidth = 5; ctx.strokeStyle = '#120b1c'; ctx.font = 'bold 20px sans-serif'; ctx.fillStyle = '#bfe6ff';
+    ctx.save(); ctx.textAlign = 'center'; ctx.lineWidth = 5; ctx.strokeStyle = '#120b1c'; ctx.font = 'bold 20px Fredoka, sans-serif'; ctx.fillStyle = '#bfe6ff';
     const t = snap.sd ? "SPECTATING \u2014 you didn't reach the win target" : 'SPECTATING'; ctx.strokeText(t, 480, 610); ctx.fillText(t, 480, 610); ctx.restore();
   }
   if (snap.sd && snap.ph !== 'end') {
-    ctx.save(); ctx.textAlign = 'center'; ctx.lineWidth = 5; ctx.strokeStyle = '#120b1c'; ctx.font = 'bold 26px sans-serif'; ctx.fillStyle = '#ff7a6b';
+    ctx.save(); ctx.textAlign = 'center'; ctx.lineWidth = 5; ctx.strokeStyle = '#120b1c'; ctx.font = 'bold 26px Fredoka, sans-serif'; ctx.fillStyle = '#ff7a6b';
     const t = 'SUDDEN DEATH \u2014 Battle Royale! Last one standing wins the match'; ctx.strokeText(t, 480, 44); ctx.fillText(t, 480, 44); ctx.restore();
   }
   if (snap.hs && snap.ph !== 'end') {
     const hs = snap.hs, iAmSeeker = hs.sk === myId; ctx.save(); ctx.textAlign = 'center'; ctx.lineWidth = 5; ctx.strokeStyle = '#120b1c';
-    const line = (t, y, col, f) => { ctx.font = f || 'bold 20px sans-serif'; ctx.fillStyle = col; ctx.strokeText(t, 480, y); ctx.fillText(t, 480, y); };
+    const line = (t, y, col, f) => { ctx.font = f || 'bold 20px Fredoka, sans-serif'; ctx.fillStyle = col; ctx.strokeText(t, 480, y); ctx.fillText(t, 480, y); };
     if (snap.ph === 'over') line(hs.res === 'seeker' ? `${names[hs.sk] || '?'} found everyone!` : 'The hiders win the round!', 60, '#7fe08a');
     else if (isLook(snap) && snap.ph === 'playing') line(`Memorise the map \u2014 your screen goes dark in ${Math.ceil(hs.t - hs.bt)}\u2026`, 44, '#ffc83b');
     else if (hs.ph === 'hide' && !isBlind(snap)) line(`Hide! You'll turn into a prop in ${Math.ceil(hs.t)}\u2026`, 44, '#ffc83b');
     else if (hs.ph === 'seek') line(`${iAmSeeker ? 'Find the hiders' : 'Stay hidden'}: ${Math.ceil(hs.t)}s`, 44, '#ffc83b');
-    if (hs.ph === 'seek' || snap.ph === 'over') line(`Seeker: ${names[hs.sk] || '?'}` + (hs.u < 0 ? ' \u00b7 unlimited swings/throws' : ` \u00b7 ${hs.u} swing/throw${hs.u === 1 ? '' : 's'} left`), 70, iAmSeeker && hs.u >= 0 && hs.u <= 3 ? '#ff9c8f' : '#fff', 'bold 15px sans-serif');
-    if (!iAmSeeker && hs.ph === 'seek' && snap.ph === 'playing' && me && me.al) line(me.ds >= 0 ? 'You look like a prop. Keep still!' : 'Stand still to turn back into a prop', 96, '#bfe6ff', 'bold 15px sans-serif');
+    if (hs.ph === 'seek' || snap.ph === 'over') line(`Seeker: ${names[hs.sk] || '?'}` + (hs.u < 0 ? ' \u00b7 unlimited swings/throws' : ` \u00b7 ${hs.u} swing/throw${hs.u === 1 ? '' : 's'} left`), 70, iAmSeeker && hs.u >= 0 && hs.u <= 3 ? '#ff9c8f' : '#fff', 'bold 15px Fredoka, sans-serif');
+    if (!iAmSeeker && hs.ph === 'seek' && snap.ph === 'playing' && me && me.al) line(me.ds >= 0 ? 'You look like a prop. Keep still!' : 'Stand still to turn back into a prop', 96, '#bfe6ff', 'bold 15px Fredoka, sans-serif');
     ctx.restore();
   }
   if (snap.bl) {   // boomerang ball: scoreboard, clock and goal banner
@@ -1130,15 +1172,15 @@ function drawHUD(snap, me, now) {
     ctx.save(); ctx.textAlign = 'center'; ctx.lineJoin = 'round';
     for (const t of [0, 1]) { ctx.fillStyle = TEAM[t].c; ctx.globalAlpha = 0.92; rrect(ctx, t === 0 ? 372 : 520, 8, 68, 40, 10); ctx.fill(); }
     ctx.globalAlpha = 1; ctx.fillStyle = 'rgba(20,12,30,0.88)'; rrect(ctx, 438, 8, 84, 40, 8); ctx.fill();
-    ctx.font = 'bold 28px sans-serif'; ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(0,0,0,0.55)'; ctx.fillStyle = '#fff';
+    ctx.font = 'bold 28px Fredoka, sans-serif'; ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(0,0,0,0.55)'; ctx.fillStyle = '#fff';
     ctx.strokeText(String(sc2[0]), 406, 40); ctx.fillText(String(sc2[0]), 406, 40); ctx.strokeText(String(sc2[1]), 554, 40); ctx.fillText(String(sc2[1]), 554, 40);
-    ctx.font = 'bold 20px sans-serif'; ctx.fillStyle = snap.ov ? '#ff7a6b' : left <= 10 ? '#ff9c8f' : '#fff'; ctx.fillText(snap.ov ? 'OT' : `${mm}:${ss}`, 480, 36);
-    ctx.font = 'bold 12px sans-serif'; ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.font = 'bold 20px Fredoka, sans-serif'; ctx.fillStyle = snap.ov ? '#ff7a6b' : left <= 10 ? '#ff9c8f' : '#fff'; ctx.fillText(snap.ov ? 'OT' : `${mm}:${ss}`, 480, 36);
+    ctx.font = 'bold 12px Fredoka, sans-serif'; ctx.fillStyle = 'rgba(255,255,255,0.85)';
     ctx.fillText(snap.ov ? 'OVERTIME \u2014 next goal wins!' : snap.bg > 0 ? `First to ${snap.bg} goals \u00b7 or lead at full time` : 'Most goals when time runs out wins', 480, 62);
     if (snap.bp && goalInfo) {
       const col = TEAM[goalInfo.team] ? TEAM[goalInfo.team].c : '#ffc83b', ownG = goalInfo.lt >= 0 && goalInfo.lt !== goalInfo.team, pul = 1 + 0.06 * Math.sin(now / 90);
-      ctx.save(); ctx.translate(480, 250); ctx.scale(pul, pul); ctx.font = 'bold 88px sans-serif'; ctx.lineWidth = 12; ctx.strokeStyle = '#120b1c'; ctx.fillStyle = col; ctx.strokeText('GOAL!', 0, 0); ctx.fillText('GOAL!', 0, 0); ctx.restore();
-      ctx.font = 'bold 24px sans-serif'; ctx.lineWidth = 6; ctx.strokeStyle = '#120b1c'; ctx.fillStyle = '#fff';
+      ctx.save(); ctx.translate(480, 250); ctx.scale(pul, pul); ctx.font = 'bold 88px Fredoka, sans-serif'; ctx.lineWidth = 12; ctx.strokeStyle = '#120b1c'; ctx.fillStyle = col; ctx.strokeText('GOAL!', 0, 0); ctx.fillText('GOAL!', 0, 0); ctx.restore();
+      ctx.font = 'bold 24px Fredoka, sans-serif'; ctx.lineWidth = 6; ctx.strokeStyle = '#120b1c'; ctx.fillStyle = '#fff';
       const tx = `${TEAM[goalInfo.team] ? TEAM[goalInfo.team].n : ''} team scores${goalInfo.name ? (ownG ? ` (own goal by ${goalInfo.name})` : ` \u2014 ${goalInfo.name}`) : ''}`;
       ctx.strokeText(tx, 480, 296); ctx.fillText(tx, 480, 296);
     }
@@ -1148,18 +1190,18 @@ function drawHUD(snap, me, now) {
   let annY = 130;
   for (const a of announcements) {
     const alpha = Math.min(1, (a.life - (now - a.t0)) / 500);
-    ctx.save(); ctx.globalAlpha = alpha; ctx.font = 'bold 18px sans-serif'; ctx.textAlign = 'center';
+    ctx.save(); ctx.globalAlpha = alpha; ctx.font = 'bold 18px Fredoka, sans-serif'; ctx.textAlign = 'center';
     ctx.lineWidth = 4; ctx.strokeStyle = '#120b1c'; ctx.fillStyle = '#ffc83b';
     ctx.strokeText(a.txt, 480, annY); ctx.fillText(a.txt, 480, annY);
     ctx.restore(); annY += 28;
   }
 
   ctx.textAlign = 'center';
-  const big = (txt, y, col) => { ctx.font = 'bold 64px sans-serif'; ctx.lineWidth = 8; ctx.strokeStyle = '#120b1c'; ctx.fillStyle = col || '#ffc83b'; ctx.strokeText(txt, 480, y); ctx.fillText(txt, 480, y); };
-  if (snap.ph === 'countdown') { big(String(Math.ceil(snap.tm)), 330); ctx.font = 'bold 20px sans-serif'; ctx.fillStyle = '#fff'; ctx.fillText(snap.bl ? 'Boomerang Ball' : `Round ${snap.rd}`, 480, 270); if (snap.bl && teamOf[myId] !== undefined) { ctx.fillStyle = TEAM[teamOf[myId]].c; ctx.fillText(`You are on the ${TEAM[teamOf[myId]].n} team \u2014 push the ball into the ${TEAM[1 - teamOf[myId]].n} goal ${teamOf[myId] === 0 ? '\u2192' : '\u2190'}`, 480, 390); } if (snap.hs) { ctx.fillStyle = '#ffc83b'; ctx.fillText(`${names[snap.hs.sk] || '?'} is the seeker \u2014 everyone else, get ready to hide!`, 480, 390); } if (snap.gm) { ctx.fillStyle = '#ffe36b'; ctx.fillText(`Grab the Golden Boomerang and hold it for ${snap.gm} seconds to win the round!`, 480, 390); } }
+  const big = (txt, y, col) => { ctx.font = 'bold 64px Fredoka, sans-serif'; ctx.lineWidth = 8; ctx.strokeStyle = '#120b1c'; ctx.fillStyle = col || '#ffc83b'; ctx.strokeText(txt, 480, y); ctx.fillText(txt, 480, y); };
+  if (snap.ph === 'countdown') { big(String(Math.ceil(snap.tm)), 330); ctx.font = 'bold 20px Fredoka, sans-serif'; ctx.fillStyle = '#fff'; ctx.fillText(snap.bl ? 'Boomerang Ball' : `Round ${snap.rd}`, 480, 270); if (snap.bl && teamOf[myId] !== undefined) { ctx.fillStyle = TEAM[teamOf[myId]].c; ctx.fillText(`You are on the ${TEAM[teamOf[myId]].n} team \u2014 push the ball into the ${TEAM[1 - teamOf[myId]].n} goal ${teamOf[myId] === 0 ? '\u2192' : '\u2190'}`, 480, 390); } if (snap.hs) { ctx.fillStyle = '#ffc83b'; ctx.fillText(`${names[snap.hs.sk] || '?'} is the seeker \u2014 everyone else, get ready to hide!`, 480, 390); } if (snap.gm) { ctx.fillStyle = '#ffe36b'; ctx.fillText(`Grab the Golden Boomerang and hold it for ${snap.gm} seconds to win the round!`, 480, 390); } }
   else if (snap.ph === 'over') { if (snap.bl) { if (snap.bw !== undefined && TEAM[snap.bw]) big(`${TEAM[snap.bw].n} team wins!`, 330, TEAM[snap.bw].c); } else if (!snap.hs) big(snap.w ? `${names[snap.w] || '?'} wins the round!` : 'Draw!', 330); }
-  else if (snap.ph === 'end') { big(snap.bl ? (TEAM[snap.ct] ? `${TEAM[snap.ct].n} team wins the match!` : 'Full time!') : snap.ch ? `${names[snap.ch] || '?'} wins the match!` : "It's a tie!", 320, '#7fe08a'); ctx.font = 'bold 20px sans-serif'; ctx.fillStyle = '#fff'; ctx.fillText('Accolades coming up…', 480, 370); }
-  if (cfg.hints && performance.now() - hintT < 12000 && snap.ph !== 'end' && !isBlind(snap)) { ctx.font = '13px sans-serif'; ctx.fillStyle = 'rgba(255,255,255,0.75)'; ctx.fillText('WASD move · aim mouse · hold + release click to throw' + (curSet.pullBack ? ' · hold click to pull back' : ' · walk over boomerangs to pick them up') + ' · right-click slash · Space dash', 480, 586); }
+  else if (snap.ph === 'end') { big(snap.bl ? (TEAM[snap.ct] ? `${TEAM[snap.ct].n} team wins the match!` : 'Full time!') : snap.ch ? `${names[snap.ch] || '?'} wins the match!` : "It's a tie!", 320, '#7fe08a'); ctx.font = 'bold 20px Fredoka, sans-serif'; ctx.fillStyle = '#fff'; ctx.fillText('Accolades coming up…', 480, 370); }
+  if (cfg.hints && performance.now() - hintT < 12000 && snap.ph !== 'end' && !isBlind(snap)) { ctx.font = '13px Fredoka, sans-serif'; ctx.fillStyle = 'rgba(255,255,255,0.75)'; ctx.fillText('WASD move · aim mouse · hold + release click to throw' + (curSet.pullBack ? ' · hold click to pull back' : ' · walk over boomerangs to pick them up') + ' · right-click slash · Space dash', 480, 586); }
 }
 
 // ---------- main loop ----------
@@ -1193,7 +1235,7 @@ function frame(nowT) {
 
 setInterval(() => { if (mode === 'mp') wsSend({ t: 'ping', c: performance.now() }); }, 1000);
 
-if (/[?&]debug\b/.test(location.search)) window.__mg = { layer: i => layerFor(i).toDataURL('image/png'), disp: () => { const m = mySnap(lastSnap); return m ? myDisp(m) : null; }, snap: () => lastSnap, music: () => ({ ctx: musicCtx, now: musicNow, paused: musicEl ? musicEl.paused : null, t: musicEl ? musicEl.currentTime : 0, vol: musicEl ? musicEl.volume : 0 }), pause: () => pauseOpen, cfg: () => cfg, binds: () => binds, net: NET, match: () => match, mouse: () => [mouseX, mouseY, haveMouse, lastAim, sc, offX, offY] };
+if (/[?&]debug\b/.test(location.search)) window.__mg = { showAcc: (a, k) => showAccolades(a, k || 'sp'), layer: i => layerFor(i).toDataURL('image/png'), disp: () => { const m = mySnap(lastSnap); return m ? myDisp(m) : null; }, snap: () => lastSnap, music: () => ({ ctx: musicCtx, now: musicNow, paused: musicEl ? musicEl.paused : null, t: musicEl ? musicEl.currentTime : 0, vol: musicEl ? musicEl.volume : 0 }), pause: () => pauseOpen, cfg: () => cfg, binds: () => binds, net: NET, match: () => match, mouse: () => [mouseX, mouseY, haveMouse, lastAim, sc, offX, offY] };
 if (window.__mg) window.__mg.net = NET;
 requestAnimationFrame(frame);
 show('menu');

@@ -1,7 +1,7 @@
 # MiniGums
 
 Online multiplayer boomerang arena game. Node.js server (authoritative simulation over WebSockets) + browser client.
-Single-player vs AI runs entirely in the browser using the same game engine.
+Single player (vs bots) runs entirely in the browser using the same game engine.
 
 ## Run it
 
@@ -159,3 +159,11 @@ give no kill credit; max 3 power-ups (a 4th replaces the oldest; Battle Royale, 
 Fire and Ice replace each other. After 75s the arena starts shrinking (sudden death).
 
 Notes: keyboard + mouse only (no touch controls). Arena size/tuning constants are at the top of `shared/game.js`.
+
+## Results (accolades) screen
+Redesigned: headline in the winner's colour, a row of player cards (winners tinted in team colour with a crown, losers as plain translucent cards), name-only award pills (hover for the description), and white Rematch / Back to menu buttons bottom right in single player (Stay in lobby / Leave lobby online).
+
+## UI style
+All menus (main menu, single-player setup, lobby, pause, settings) now share the results screen's look: purple glow background, translucent rounded panels, bold uppercase headings, white pill buttons (translucent for secondary), round gum pickers and flat chips. In-game HUD uses the same rounded, team-tinted rows.
+
+Menu backdrop: drifting bubbles and dust motes (paused when the menu is hidden; off with reduced-motion). Gum pickers tint with each gum's own colour, hop when chosen and do a walk wobble on hover.
